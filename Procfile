@@ -1,1 +1,1 @@
-worker: python -m bin.main
+worker: python -m lib.main
