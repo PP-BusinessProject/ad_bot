@@ -28,6 +28,7 @@ from .models.misc.input_model import InputModel
 from .sqlalchemy_storage import SQLAlchemyStorage
 from .utils.cached_morph_analyzer import CachedMorphAnalyzer
 from .utils.pyrogram import auto_init
+from .utils.sqlalchemy_pg_compiler_patch import PGCompiler  # noqa: F401
 
 
 @dataclass(init=False)
