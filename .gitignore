@@ -207,7 +207,7 @@ venv.bak/
 .mypy_cache/
 
 # typings
-typings/
+/typings/
 
 ### VisualStudioCode ###
 .vscode/
