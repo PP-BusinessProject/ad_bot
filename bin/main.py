@@ -6,14 +6,15 @@ from typing import Final
 from apscheduler.executors.asyncio import AsyncIOExecutor
 from apscheduler.jobstores.memory import MemoryJobStore
 from apscheduler.schedulers.asyncio import AsyncIOScheduler
-from lib.ad_bot_client import AdBotClient
-from lib.models.base_interface import Base
-from lib.sqlalchemy_storage import SQLAlchemyStorage
 from sqlalchemy.ext.asyncio.engine import create_async_engine
 from sqlalchemy.ext.asyncio.scoping import async_scoped_session
 from sqlalchemy.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm.session import sessionmaker
 from sqlalchemy.pool.impl import AsyncAdaptedQueuePool
+
+from ..lib.ad_bot_client import AdBotClient
+from ..lib.models.base_interface import Base
+from ..lib.sqlalchemy_storage import SQLAlchemyStorage
 
 #
 basicConfig(level=environ.get('LOGGING', 'INFO').strip())
