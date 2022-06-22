@@ -192,8 +192,15 @@ class CheckChats(object):
             if not isinstance(chat_link, str) or (
                 not self.INVITE_LINK_RE.match(chat_link)
             ):
-                with suppress(PeerIdInvalid):
+                try:
                     peers[chat_link] = await self.resolve_peer(chat_link)
+                except PeerIdInvalid:
+                    pass
+                except FloodWait as e:
+                    if yield_on_flood:
+                        yield CheckChatsFloodWait({}, e.value)
+                    else:
+                        raise
 
         dialog_chats: dict[str, Chat] = {}
         if peers and self.is_bot:
