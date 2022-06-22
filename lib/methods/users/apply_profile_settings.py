@@ -4,6 +4,7 @@ from contextlib import suppress
 from typing import TYPE_CHECKING
 
 from pyrogram.errors.rpc_error import RPCError
+from pyrogram.types.messages_and_media.message import Message
 from sqlalchemy.sql.expression import select
 
 from ...models.clients.bot_model import BotModel
@@ -65,3 +66,47 @@ class ApplyProfileSettings(object):
             )
         with suppress(RPCError):
             await self.set_username(bot.username)
+            self.username = bot.username
+
+        photos = [_.file_id async for _ in self.get_chat_photos('me')]
+        if bot.avatar_message_id is not None:
+            photos_messages: list[Message] = [
+                message
+                for message in await self.get_messages(
+                    bot.owner.service_id,
+                    range(
+                        bot.avatar_message_id,
+                        bot.avatar_message_id + 10,
+                    ),
+                )
+                if message.photo is not None
+            ]
+            avatar_message = next(iter(photos_messages), None)
+            photos_messages = (
+                [
+                    message
+                    for message in photos_messages
+                    if message.media_group_id == avatar_message.media_group_id
+                ]
+                if avatar_message and avatar_message.media_group_id
+                else photos_messages[:1]
+            )
+
+            photos_to_delete: list[str] = []
+            for index, message in reversed(tuple(enumerate(photos_messages))):
+                if index < len(photos):
+                    if not photos_to_delete and (
+                        photos[index] == message.photo.file_id
+                    ):
+                        continue
+                    photos_to_delete.append(photos[index])
+
+                await self.set_profile_photo(
+                    photo=await message.download(in_memory=True)
+                )
+        else:
+            photos_to_delete = photos
+
+        if photos_to_delete:
+            with suppress(RPCError):
+                await self.delete_profile_photos(photos_to_delete)

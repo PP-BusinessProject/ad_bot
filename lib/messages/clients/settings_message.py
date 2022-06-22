@@ -8,6 +8,8 @@ from typing import TYPE_CHECKING, Optional, Union
 
 from pyrogram.errors import RPCError, UsernameInvalid, UsernameNotOccupied
 from pyrogram.errors.exceptions.bad_request_400 import PeerIdInvalid
+from pyrogram.errors.exceptions.flood_420 import Flood
+from pyrogram.errors.exceptions.unauthorized_401 import Unauthorized
 from pyrogram.types import InlineKeyboardButton as IKB
 from pyrogram.types import InlineKeyboardMarkup as IKM
 from pyrogram.types import InputMediaPhoto, Message
@@ -194,13 +196,13 @@ class SettingsMessage(object):
                 async with auto_init(self.get_worker(phone_number)) as worker:
                     try:
                         await worker.apply_profile_settings(bot)
-                    except BaseException:
+                    except (Flood, Unauthorized):
                         continue
 
                 try:
                     return await abort(
-                        'Предыдущий бот больше не валиден. Новый бот был '
-                        'назначен и настройки были успешно применены.'
+                        'Предыдущий бот не смог применить настройки. Новый '
+                        'бот был назначен и настройки были успешно применены.'
                         if phone_number != bot.phone_number
                         else 'Настройки для бота были успешно применены.',
                         show_alert=True,
@@ -212,7 +214,8 @@ class SettingsMessage(object):
             return await abort(
                 'Бот для рассылки не был назначен.'
                 if bot.phone_number is None
-                else 'Бот для рассылки больше не валиден.'
+                else 'Бот для рассылки не смог применить настройки.',
+                show_alert=True,
             )
 
         elif data.command == self.SETTINGS.REPLY_VIEW:
