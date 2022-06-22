@@ -479,13 +479,13 @@ class BotMessage(object):
                 )
 
         bot_valid: Optional[bool] = None
-        bot_has_owner_peer: bool = False
+        bot_has_forward_peer: bool = False
         if bot.phone_number is not None and chat_id == bot.owner.id:
             bot_worker = self.get_worker(bot.phone_number)
             if bot_valid := await bot_worker.validate():
                 async with auto_init(bot_worker):
-                    bot_has_owner_peer = bool(
-                        await bot_worker.check_chats(bot.owner.id)
+                    bot_has_forward_peer = bool(
+                        await bot_worker.check_chats(bot.forward_to_id)
                     )
 
         max_ads: int = await self.storage.Session.scalar(
@@ -543,12 +543,14 @@ class BotMessage(object):
                         link=f't.me/+{bot.phone_number}'
                     )
                     if bot_valid is False
-                    else '\n__%s__' % 'Внимание! Назначенный [Бот]({link}) не '
-                    'имеет доступа к личной переписке с вами! Для того чтобы '
-                    'у бота была возможность пересылать полученные отклики от '
-                    'пользователей, вам необходимо написать ему в личные '
-                    'сообщения.'.format(link=f't.me/+{bot.phone_number}')
-                    if bot_valid and not bot_has_owner_peer
+                    else '\n__%s__' % 'Внимание! [Бот]({link}) не имеет '
+                    'доступа к личной переписке с назначенным контактом! '
+                    'Для того чтобы у бота была возможность пересылать  '
+                    'полученные отклики от пользователей, получателю '
+                    'необходимо написать ему в личные сообщения.'.format(
+                        link=f't.me/+{bot.phone_number}'
+                    )
+                    if bot_valid and not bot_has_forward_peer
                     else None,
                 )
                 if _ is not None
