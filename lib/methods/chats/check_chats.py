@@ -1,6 +1,5 @@
 """The module with the :meth:`AdBotClient.check_chats`."""
 
-from contextlib import suppress
 from time import monotonic
 from typing import (
     TYPE_CHECKING,
@@ -15,7 +14,6 @@ from typing import (
 )
 
 from pyrogram.errors.exceptions.bad_request_400 import (
-    BadRequest,
     PeerIdInvalid,
     UserAlreadyParticipant,
 )

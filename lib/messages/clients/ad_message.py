@@ -209,8 +209,8 @@ class AdMessage(object):
             if not isinstance(result, CategoryModel):
                 return result
             ad.category_id = result.id
-            data = data.__copy__(kwargs=data.kwargs | dict(s=None))
             await self.storage.Session.commit()
+            data = data.__copy__(kwargs=data.kwargs | dict(s=None))
 
         elif data.command == self.AD.CATEGORY_DELETE:
             ad.category_id = None
@@ -339,11 +339,14 @@ class AdMessage(object):
                 + [[IKB('Назад', _query(self.AD.PAGE))]],
             )
 
-        category_parents = []
-        if (_category := ad.category) is not None:
-            category_parents.append(_category.name)
-            while _category.parent is not None:
-                category_parents.append((_category := _category.parent).name)
+        category_list = []
+        if ad.category_id is not None:
+            category: CategoryModel = await self.storage.Session.get(
+                CategoryModel, ad.category_id
+            )
+            category_list.append(category.name)
+            while category.parent is not None:
+                category_list.append((category := category.parent).name)
 
         return await self.send_or_edit(
             *(chat_id, message_id),
@@ -362,8 +365,8 @@ class AdMessage(object):
                         else 'Отключено'
                     ),
                     '**Текущая категория:** {}'.format(
-                        ' > '.join(category_parents)
-                        if category_parents
+                        ' > '.join(reversed(category_list))
+                        if category_list
                         else '__Отсутствует__'
                     ),
                     '**Количество пересланных сообщений:** %s шт'
@@ -391,13 +394,13 @@ class AdMessage(object):
                                     _query(self.AD.CATEGORY_DELETE),
                                 )
                             ]
-                            if ad.category is not None
+                            if ad.category_id is not None
                             else []
                         )
                         + [
                             IKB(
                                 'Выбрать категорию'
-                                if ad.category is None
+                                if ad.category_id is None
                                 else 'Изменить категорию',
                                 _query(self.AD.CATEGORY_PICK),
                             )

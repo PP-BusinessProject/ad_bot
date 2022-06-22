@@ -34,7 +34,6 @@ from ..models.bots.sent_ad_model import SentAdModel
 from ..models.clients.ad_model import AdModel
 from ..models.clients.bot_model import BotModel
 from ..models.clients.user_model import UserModel
-from ..models.misc.category_model import CategoryModel
 from ..models.sessions.session_model import SessionModel
 from ..utils.pyrogram import auto_init
 
@@ -167,7 +166,7 @@ class SenderJob(object):
                 await self.storage.Session.commit()
 
             ad: AdModel
-            checked_empty_categories: set[CategoryModel] = set()
+            checked_empty_categories: set[int] = set()
             async for ad in await self.storage.Session.stream_scalars(
                 select(AdModel)
                 .where(with_parent(bot, BotModel.ads) & AdModel.valid)
@@ -186,7 +185,7 @@ class SenderJob(object):
                     )
                 )
             ):
-                if ad.category in checked_empty_categories:
+                if ad.category_id in checked_empty_categories:
                     continue
                 chat_query = (
                     select(ChatModel)
@@ -213,8 +212,10 @@ class SenderJob(object):
                         SentAdModel.timestamp,
                     )
                 )
-                if ad.category is not None:
-                    chat_query = chat_query.filter_by(category=ad.category)
+                if ad.category_id is not None:
+                    chat_query = chat_query.filter_by(
+                        category_id=ad.category_id
+                    )
 
                 try:
                     async for chat in worker.iter_check_chats(
@@ -232,9 +233,9 @@ class SenderJob(object):
                         if chat is not None:
                             break
                     else:
-                        if ad.category is None:
+                        if ad.category_id is None:
                             break
-                        checked_empty_categories.add(ad.category)
+                        checked_empty_categories.add(ad.category_id)
                         continue
                 except ValueError:
                     continue

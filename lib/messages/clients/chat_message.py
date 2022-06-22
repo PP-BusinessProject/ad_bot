@@ -318,6 +318,15 @@ class ChatMessage(object):
                 reply_markup=IKM([[IKB('Отменить', self.INPUT.CANCEL)]]),
             )
 
+        category_list = []
+        if chat.category_id is not None:
+            category: CategoryModel = await self.storage.Session.get(
+                CategoryModel, chat.category_id
+            )
+            category_list.append(category.name)
+            while category.parent is not None:
+                category_list.append((category := category.parent).name)
+
         return await self.send_or_edit(
             *(chat_id, message_id),
             '\n'.join(
@@ -337,11 +346,10 @@ class ChatMessage(object):
                     '**Статус:** '
                     + ('Активен' if chat.active else 'Неактивен'),
                     '**Периодичность:** ' + self.morph.timedelta(chat.period),
-                    '**Категория:** '
-                    + (
-                        ' > '.join(chat.category.values)
-                        if chat.category and chat.category.values
-                        else 'Отсутствует'
+                    '**Категория:** {}'.format(
+                        ' > '.join(reversed(category_list))
+                        if category_list
+                        else '__Отсутствует__'
                     ),
                     '**Причина деактивации:** '
                     + (
@@ -418,13 +426,13 @@ class ChatMessage(object):
                                 data(self.SENDER_CHAT.REMOVE_CATEGORY),
                             )
                         ]
-                        if chat.category is not None
+                        if chat.category_id is not None
                         else []
                     )
                     + [
                         IKB(
                             'Изменить категорию'
-                            if chat.category is not None
+                            if chat.category_id is not None
                             else 'Добавить категорию',
                             data(self.SENDER_CHAT.CATEGORY),
                         )

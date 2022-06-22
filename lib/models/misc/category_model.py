@@ -56,6 +56,7 @@ class CategoryModel(Base):
         'CategoryModel',
         back_populates='children',
         lazy='joined',
+        join_depth=3,
         remote_side=[id],
         cascade='save-update',
         uselist=False,

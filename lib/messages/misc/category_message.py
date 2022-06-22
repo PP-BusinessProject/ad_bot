@@ -1,4 +1,4 @@
-from typing import TYPE_CHECKING, Dict, Optional, Union
+from typing import TYPE_CHECKING, Optional, Union
 
 from pyrogram.types.bots_and_keyboards.inline_keyboard_button import (
     InlineKeyboardButton as IKB,
@@ -67,7 +67,7 @@ class CategoryMessage(object):
         if isinstance(message_id, Message):
             message_id = message_id.id
 
-        def _query(id: int, /) -> Query:
+        def _query(id: int = 0, /) -> Query:
             return data.__copy__(kwargs=data.kwargs | {kwarg: id})
 
         async def abort(text: str, /) -> Optional[Message]:
@@ -90,7 +90,7 @@ class CategoryMessage(object):
             categories = category.children
         else:
             categories = await self.storage.Session.scalars(
-                select(CategoryModel)
+                select(CategoryModel).where(CategoryModel.parent_id.is_(None))
             )
             if not (categories := categories.all()):
                 return await abort(
@@ -108,10 +108,14 @@ class CategoryMessage(object):
             ]
         if data is not None:
             back = IKB(
-                f'Назад в "{category.name}"'
+                f'Назад в "{category.parent.name}"'
+                if category is not None and category.parent is not None
+                else 'Назад'
                 if category is not None
-                else 'Назад',
-                _query(category.id)
+                else 'Назад на главную',
+                _query(category.parent_id)
+                if category is not None and category.parent_id is not None
+                else _query()
                 if category is not None
                 else data.__copy__(
                     cancel_command,
@@ -122,13 +126,11 @@ class CategoryMessage(object):
             )
             reply_markup.append([back])
 
-        category_parents = []
-        if (_category := category) is None:
-            category_parents.append('Отсутствует')
-        else:
-            category_parents.append(_category.name)
+        category_list: list[str] = []
+        if (_category := category) is not None:
+            category_list.append(_category.name)
             while _category.parent is not None:
-                category_parents.append((_category := _category.parent).name)
+                category_list.append((_category := _category.parent).name)
 
         return await self.send_or_edit(
             *(chat_id, message_id),
@@ -136,7 +138,11 @@ class CategoryMessage(object):
                 _
                 for _ in (
                     prefix_text,
-                    f"Текущая категория: **{' > '.join(category_parents)}**",
+                    '**Текущая категория:** {}'.format(
+                        ' > '.join(reversed(category_list))
+                        if category_list
+                        else '__Отсутствует__'
+                    ),
                 )
                 if _
             ),
