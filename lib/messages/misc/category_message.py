@@ -126,8 +126,9 @@ class CategoryMessage(object):
         if (_category := category) is None:
             category_parents.append('Отсутствует')
         else:
+            category_parents.append(_category.name)
             while _category.parent is not None:
-                category_parents.append(_category := _category.parent)
+                category_parents.append((_category := _category.parent).name)
 
         return await self.send_or_edit(
             *(chat_id, message_id),

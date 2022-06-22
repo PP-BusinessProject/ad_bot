@@ -339,6 +339,12 @@ class AdMessage(object):
                 + [[IKB('Назад', _query(self.AD.PAGE))]],
             )
 
+        category_parents = []
+        if (_category := ad.category) is not None:
+            category_parents.append(_category.name)
+            while _category.parent is not None:
+                category_parents.append((_category := _category.parent).name)
+
         return await self.send_or_edit(
             *(chat_id, message_id),
             text='\n'.join(
@@ -356,8 +362,8 @@ class AdMessage(object):
                         else 'Отключено'
                     ),
                     '**Текущая категория:** {}'.format(
-                        ' > '.join(ad.category.values)
-                        if ad.category is not None
+                        ' > '.join(category_parents)
+                        if category_parents
                         else '__Отсутствует__'
                     ),
                     '**Количество пересланных сообщений:** %s шт'
