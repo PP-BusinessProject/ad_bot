@@ -3,32 +3,13 @@
 from enum import Enum
 from typing import Final
 
-# from .ad_message import AdMessage
-# from .awaiting_input import AwaitingInputHandler
-# from .bot_message import BotMessage
-# from .reply_to_user import ReplyToUser
-# from .sender_chats_message import SenderChatsMessage
-# from .sender_clients_message import SenderClientsMessage
-# from .service_help import ServiceHelp
-# from .service_subscription import ServiceSubscription
-# from .service_validation import ServiceValidation
-# from .settings_message import SettingsMessage
-from .start_message import StartMessage
+from .bots import Bots
+from .clients import Clients
+from .misc import Misc
+from .service import Service
 
 
-class Messages(
-    # AdMessage,
-    # AwaitingInputHandler,
-    # BotMessage,
-    # ReplyToUser,
-    # SenderChatsMessage,
-    # SenderClientsMessage,
-    # ServiceHelp,
-    # ServiceSubscription,
-    # ServiceValidation,
-    # SettingsMessage,
-    StartMessage,
-):
+class Messages(Bots, Clients, Misc, Service):
     pass
 
 
@@ -36,10 +17,18 @@ SEPARATOR: Final[str] = ''
 
 
 class Commands(object):
-    class AWAITING_INPUT(str, Enum):
+    class PAGE(str, Enum):
+        """The commands for working with pages."""
+
+        _SELF: Final[str] = SEPARATOR.join(('P',))
+        INFO: Final[str] = SEPARATOR.join((_SELF, 'I'))
+        ERROR_LEFT: Final[str] = SEPARATOR.join((_SELF, 'E', 'L'))
+        ERROR_RIGHT: Final[str] = SEPARATOR.join((_SELF, 'E', 'R'))
+
+    class INPUT(str, Enum):
         """The commands to use when awaiting user inputs."""
 
-        _SELF: Final[str] = SEPARATOR.join(('A',))
+        _SELF: Final[str] = SEPARATOR.join(('I',))
         CANCEL: Final[str] = SEPARATOR.join((_SELF, 'C'))
 
     class SERVICE(str, Enum):
@@ -93,6 +82,7 @@ class Commands(object):
         ABOUT: Final[str] = SEPARATOR.join((_SELF, 'AB'))
         USERNAME: Final[str] = SEPARATOR.join((_SELF, 'U'))
         REPLY: Final[str] = SEPARATOR.join((_SELF, 'REP'))
+        REPLY_VIEW: Final[str] = SEPARATOR.join((REPLY, 'V'))
         CONTACT: Final[str] = SEPARATOR.join((_SELF, 'C'))
         AVATAR: Final[str] = SEPARATOR.join((_SELF, 'AV'))
 

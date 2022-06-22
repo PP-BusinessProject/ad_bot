@@ -6,7 +6,13 @@ from typing import Final, Optional
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.schema import Column, ForeignKey
-from sqlalchemy.sql.sqltypes import BigInteger, DateTime, Integer, String
+from sqlalchemy.sql.sqltypes import (
+    BigInteger,
+    Boolean,
+    DateTime,
+    Integer,
+    String,
+)
 
 from .._constraints import MAX_NAME_LENGTH, MAX_USERNAME_LENGTH
 from ..base_interface import Base
@@ -39,6 +45,13 @@ class ReplyModel(Base):
         primary_key=True,
         key='message_id',
     )
+    replied: Final[Column[bool]] = Column(
+        'Replied',
+        Boolean(create_constraint=True),
+        nullable=False,
+        default=False,
+        key='replied',
+    )
     first_name: Final[Column[str]] = Column(
         'FirstName',
         String(MAX_NAME_LENGTH),
@@ -57,7 +70,7 @@ class ReplyModel(Base):
     )
     phone_number: Final[Column[Optional[int]]] = Column(
         'PhoneNumber',
-        Integer,
+        BigInteger,
         key='phone_number',
     )
     timestamp: Final[Column[datetime]] = Column(

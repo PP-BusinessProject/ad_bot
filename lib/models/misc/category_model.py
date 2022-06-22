@@ -2,7 +2,8 @@ from typing import TYPE_CHECKING, Final, Optional
 
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.relationships import RelationshipProperty
-from sqlalchemy.sql.schema import Column, ForeignKey
+from sqlalchemy.sql.expression import literal_column
+from sqlalchemy.sql.schema import CheckConstraint, Column, ForeignKey
 from sqlalchemy.sql.sqltypes import Integer, String
 
 from ..base_interface import Base
@@ -17,6 +18,7 @@ class CategoryModel(Base):
         'Id',
         Integer,
         primary_key=True,
+        autoincrement=True,
         key='id',
     )
     parent_id: Final[Column[Optional[int]]] = Column(
@@ -28,7 +30,9 @@ class CategoryModel(Base):
     name: Final[Column[str]] = Column(
         'Name',
         String(255),
+        CheckConstraint(literal_column('"Name"') != literal_column('\'\'')),
         nullable=False,
+        unique=True,
         key='name',
     )
 
@@ -43,6 +47,26 @@ class CategoryModel(Base):
         'ChatModel',
         back_populates='category',
         lazy='noload',
+        cascade='save-update, merge, expunge, delete, delete-orphan',
+        uselist=True,
+    )
+    parent: Final[
+        'RelationshipProperty[Optional[CategoryModel]]'
+    ] = relationship(
+        'CategoryModel',
+        back_populates='children',
+        lazy='joined',
+        remote_side=[id],
+        cascade='save-update',
+        uselist=False,
+    )
+    children: Final[
+        'RelationshipProperty[list[CategoryModel]]'
+    ] = relationship(
+        'CategoryModel',
+        back_populates='parent',
+        lazy='noload',
+        join_depth=1,
         cascade='save-update, merge, expunge, delete, delete-orphan',
         uselist=True,
     )

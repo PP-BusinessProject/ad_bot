@@ -7,7 +7,7 @@ from sqlalchemy.orm import relationship
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.expression import ClauseElement, and_, or_
 from sqlalchemy.sql.schema import Column
-from sqlalchemy.sql.sqltypes import Boolean, Integer
+from sqlalchemy.sql.sqltypes import Boolean, BigInteger
 from typing_extensions import Self
 
 from .._mixins import Timestamped
@@ -55,7 +55,7 @@ class ClientModel(Timestamped, Base):
 
     phone_number: Final[Column[int]] = Column(
         'PhoneNumber',
-        Integer,
+        BigInteger,
         primary_key=True,
         key='phone_number',
     )

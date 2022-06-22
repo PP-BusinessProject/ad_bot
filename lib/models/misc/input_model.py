@@ -7,10 +7,9 @@ from typing import TYPE_CHECKING, Callable, Final, Generic, Optional, TypeVar
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.schema import Column
-from sqlalchemy.sql.sqltypes import BigInteger, Boolean, Integer, String
+from sqlalchemy.sql.sqltypes import BigInteger, Boolean, Enum, Integer, String
 
 from ...utils.query import Query, QueryType
-from .._types import IntEnum as IntEnumColumn
 from .._types import LocalFunction
 from ..base_interface import Base
 from ..clients.user_model import UserRole
@@ -75,7 +74,7 @@ class InputModel(Generic[T], Base):
         success (``Optional[bool]``):
             If this input has been completed successfully.
 
-        used_messages (``list[UsedMessage]``):
+        used_messages (``list[InputMessageModel]``):
             The messages used in this input.
     """
 
@@ -133,7 +132,7 @@ class InputModel(Generic[T], Base):
     )
     user_role: Final[Column[Optional[UserRole]]] = Column(
         'UserRole',
-        IntEnumColumn(UserRole),
+        Enum(UserRole),
         key='user_role',
     )
     calls_count: Final[Column[Optional[int]]] = Column(

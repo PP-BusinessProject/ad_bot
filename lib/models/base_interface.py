@@ -15,7 +15,6 @@ from typing import (
     Final,
     Iterable,
     List,
-    Tuple,
     Type,
     TypeVar,
     Union,
@@ -28,7 +27,7 @@ from sqlalchemy.orm.decl_api import declarative_base, declared_attr
 from sqlalchemy.orm.properties import ColumnProperty
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.orm.state import InstanceState
-from sqlalchemy.sql.schema import Column, SchemaItem
+from sqlalchemy.sql.schema import Column
 from typing_extensions import Self
 
 #
@@ -130,9 +129,6 @@ class BaseInterface(object):
 
     inflect: ClassVar[engine] = engine()
     __mapper_args__: Final[dict[str, Any]] = dict(eager_defaults=True)
-    __table_args__: Final[Tuple[Union[SchemaItem, Dict[str, Any]], ...]] = (
-        dict(sqlite_with_rowid=False),
-    )
 
     @declared_attr
     def __tablename__(cls: Type[Self], /) -> str:  # noqa: N805

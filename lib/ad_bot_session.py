@@ -76,6 +76,7 @@ from pyrogram.types.messages_and_media.message import Message
 from pyrogram.utils import get_peer_id
 from typing_extensions import Self
 
+from .ad_bot_auth import AdBotAuth
 from .ad_bot_connection import AdBotConnection
 from .ad_bot_handler import AdBotHandler
 from .utils.query import Query
@@ -120,7 +121,6 @@ class AdBotSession(Session):
         self.auth_key = auth_key
 
         self.connection = None
-        self.auth_key_id = sha1(auth_key, usedforsecurity=False).digest()[-8:]
         self.session_id = urandom(8)
         self.msg_factory = MsgFactory()
         self.salt = 0
@@ -129,21 +129,32 @@ class AdBotSession(Session):
         self.stored_msg_ids = []
         self.ping_job = None
         self.network_task = None
+        self.auth_key_id = None
         self.is_connected = Event()
 
     async def start(self: Self, /) -> None:
-        while True:
-            self.connection = AdBotConnection(
-                self.dc_id,
-                self.test_mode,
-                self.client.ipv6,
-                self.client.proxy,
-                self.is_media,
-                # mode=0,
-            )
+        self.connection = AdBotConnection(
+            self.dc_id,
+            self.test_mode,
+            self.client.ipv6,
+            self.client.proxy,
+            self.is_media,
+            # mode=0,
+        )
 
+        while True:
             try:
                 await self.connection.connect()
+                if self.auth_key is None or self.auth_key_id is None:
+                    self.auth_key = await self.client.storage.auth_key()
+                    if self.auth_key is None:
+                        self.auth_key = await AdBotAuth(
+                            self.connection
+                        ).create()
+                        await self.client.storage.auth_key(self.auth_key)
+                    self.auth_key_id = sha1(
+                        self.auth_key, usedforsecurity=False
+                    ).digest()[-8:]
                 self.network_task = self.client.loop.create_task(
                     self.network_worker()
                 )
@@ -303,7 +314,7 @@ class AdBotSession(Session):
                 if (date := getattr(update, 'date', None)) is None:
                     continue
                 log.info(f'GetDifference (pts={pts}, pts_count={pts_count})')
-                difference = await self.send(
+                difference = await self.invoke(
                     GetDifference(pts=pts - pts_count, date=date, qts=-1)
                 )
                 updates += difference.other_updates
@@ -521,7 +532,9 @@ class AdBotSession(Session):
             try:
                 return await self._send(data, timeout=timeout)
             except FloodWait as e:
-                if (amount := e.x) > (sleep_threshold or self.SLEEP_THRESHOLD):
+                if (amount := e.value) > (
+                    sleep_threshold or self.SLEEP_THRESHOLD
+                ):
                     raise
 
                 log.warning(
@@ -546,4 +559,4 @@ class AdBotSession(Session):
                 )
 
                 await sleep(0.5)
-                return await self.send(data, retries - 1, timeout)
+                return await self.invoke(data, retries - 1, timeout)

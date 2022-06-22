@@ -25,7 +25,7 @@ class SessionModel(Timestamped, Base):
 
     phone_number: Final[Column[int]] = Column(
         'PhoneNumber',
-        Integer,
+        BigInteger,
         primary_key=True,
         default=0,
         key='phone_number',
@@ -43,9 +43,11 @@ class SessionModel(Timestamped, Base):
         nullable=False,
         key='api_id',
     )
-    test_mode: Final[Column[Optional[bool]]] = Column(
+    test_mode: Final[Column[bool]] = Column(
         'TestMode',
         Boolean(create_constraint=True),
+        nullable=False,
+        default=False,
         key='test_mode',
     )
     auth_key: Final[Column[Optional[bytes]]] = Column(

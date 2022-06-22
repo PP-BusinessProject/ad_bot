@@ -166,9 +166,9 @@ class AdBotHandler(Generic[T], Handler):
         ):
             input = await client.storage.Session.get(InputModel, chat_id)
             if input is not None:
-                await client.awaiting_input(
+                await client.input_message(
                     *(input, message_id),
-                    data=Query(client.AWAITING_INPUT.CANCEL),
+                    data=Query(client.INPUT.CANCEL),
                     query_id=query_id,
                 )
             await client.answer_edit_send(
@@ -181,11 +181,13 @@ class AdBotHandler(Generic[T], Handler):
             return await client.storage.Session.remove()
 
         cancel: bool = False
+        chat_peer: Optional[Any] = None
         try:
             if self.action is not None:
+                chat_peer = await client.resolve_peer(chat_id)
                 with suppress(RPCError):
                     cancel = await client.send_chat_action(
-                        chat_id, self.action
+                        chat_peer, self.action
                     )
             return await anycorofunction(
                 self.callback.__func__
@@ -203,21 +205,25 @@ class AdBotHandler(Generic[T], Handler):
         except BaseException:
             print_exc()
         finally:
-            if cancel:
+            if query_id is not None:
                 with suppress(RPCError):
-                    await client.send_chat_action(chat_id, ChatAction.CANCEL)
-            if message_id is not None and client.storage.phone_number:
+                    await client.answer_callback_query(query_id)
+            if message_id is not None and client.storage.is_nested:
                 with suppress(RPCError):
-                    await client.send(
+                    if chat_peer is None:
+                        chat_peer = await client.resolve_peer(chat_id)
+                    await client.invoke(
                         ReadHistory(
-                            peer=await client.resolve_peer(chat_id),
+                            peer=chat_peer,
                             max_id=message_id
                             if isinstance(message_id, int)
                             else message_id.id,
                         ),
                         no_updates=True,
                     )
-            if query_id is not None:
+            if cancel:
                 with suppress(RPCError):
-                    await client.answer_callback_query(query_id)
+                    await client.send_chat_action(
+                        chat_peer or chat_id, ChatAction.CANCEL
+                    )
             await client.storage.Session.remove()

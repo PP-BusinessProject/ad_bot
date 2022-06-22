@@ -3,6 +3,7 @@ from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
+from traceback import print_exc
 from typing import Any, Callable, ClassVar, Dict, Final, List, Optional, Type
 
 from apscheduler.schedulers import (
@@ -17,14 +18,18 @@ from pyrogram.session.internals import MsgId
 from pyrogram.session.session import Session
 from sqlalchemy.event.api import listen, remove
 from sqlalchemy.sql.expression import select
+from sqlalchemy.sql.functions import now
 from typing_extensions import Self
 
 from .ad_bot_handler import AdBotHandler
 from .ad_bot_session import AdBotSession
+from .jobs import Jobs
 from .messages import Commands, Messages
 from .methods import Methods
 from .models.base_interface import BaseInterface
+from .models.clients.user_model import UserModel, UserRole
 from .models.misc.input_model import InputModel
+from .models.misc.settings_model import SettingsModel
 from .sqlalchemy_storage import SQLAlchemyStorage
 from .utils.cached_morph_analyzer import CachedMorphAnalyzer
 from .utils.pyrogram import auto_init
@@ -32,7 +37,7 @@ from .utils.sqlalchemy_pg_compiler_patch import PGCompiler  # noqa: F401
 
 
 @dataclass(init=False)
-class AdBotClient(Commands, Messages, Methods, Client):
+class AdBotClient(Commands, Jobs, Messages, Methods, Client):
 
     loop: Final[AbstractEventLoop]
     storage: Final[SQLAlchemyStorage]
@@ -74,6 +79,7 @@ class AdBotClient(Commands, Messages, Methods, Client):
     takeout_id: Optional[int]
     disconnect_handler: Optional[Any]
     username: Optional[str]
+    is_bot: Optional[bool]
 
     groups: Final[Dict[int, List[AdBotHandler]]]
     listeners: Final[
@@ -159,17 +165,98 @@ class AdBotClient(Commands, Messages, Methods, Client):
         object.__setattr__(self, 'takeout_id', None)
         object.__setattr__(self, 'disconnect_handler', None)
         object.__setattr__(self, 'username', None)
-
-        for model, value in self.listeners.items():
-            for name, listeners in value.items():
-                for listener in listeners:
-                    listen(model, name, listener, propagate=True)
+        object.__setattr__(self, 'is_bot', None)
+        if self.storage.is_nested:
+            self.groups[0] = [
+                AdBotHandler(self.reply_to_user, action=None, is_query=False)
+            ]
+            return
 
         self.groups[0] = [
+            AdBotHandler(
+                self.input_message,
+                self.INPUT,
+                replace=True,
+                private=False,
+            ),
+            AdBotHandler(self.page_message, self.PAGE, is_query=True),
+            #
             AdBotHandler(self.start_message, '/start', is_query=False),
             AdBotHandler(
                 self.start_message,
                 self.SERVICE._SELF,
+                is_query=True,
+            ),
+            #
+            AdBotHandler(
+                self.service_help,
+                self.HELP,
+                private=False,
+                is_query=True,
+            ),
+            AdBotHandler(
+                self.service_validation,
+                self.SERVICE,
+                private=False,
+                is_query=True,
+            ),
+            AdBotHandler(
+                self.service_subscription,
+                self.SUBSCRIPTION,
+                private=False,
+                is_query=True,
+            ),
+            #
+            AdBotHandler(
+                self.chats_list,
+                self.SENDER_CHAT.LIST,
+                check_user=UserRole.SUPPORT,
+                is_query=True,
+            ),
+            AdBotHandler(
+                self.chat_message,
+                self.SENDER_CHAT,
+                check_user=UserRole.SUPPORT,
+                is_query=True,
+            ),
+            #
+            AdBotHandler(
+                self.clients_list,
+                self.SENDER_CLIENT.LIST,
+                check_user=UserRole.SUPPORT,
+                is_query=True,
+            ),
+            AdBotHandler(
+                self.client_message,
+                self.SENDER_CLIENT,
+                check_user=UserRole.SUPPORT,
+                is_query=True,
+            ),
+            #
+            AdBotHandler(
+                self.bots_list,
+                self.BOT.LIST,
+                check_user=UserRole.SUPPORT,
+                is_query=True,
+            ),
+            AdBotHandler(
+                self.bot_message,
+                self.BOT,
+                check_user=UserRole.USER,
+                is_query=True,
+            ),
+            #
+            AdBotHandler(
+                self.settings_message,
+                (self.SETTINGS, self.SETTINGS_DELETE),
+                check_user=UserRole.USER,
+                is_query=True,
+            ),
+            #
+            AdBotHandler(
+                self.ad_message,
+                self.AD,
+                check_user=UserRole.USER,
                 is_query=True,
             ),
         ]
@@ -183,48 +270,53 @@ class AdBotClient(Commands, Messages, Methods, Client):
                     remove(model, name, listener)
 
     async def start(self: Self, /) -> Self:
-        try:
-            with suppress(SchedulerAlreadyRunningError):
-                self.scheduler.start(paused=True)
-            return await super().start()
-        finally:
-            if not self.storage.is_nested:
-                async for input in await self.storage.Session.stream_scalars(
-                    select(InputModel).filter_by(success=None)
-                ):
-                    self.add_awaiting_input_handler(
-                        input.chat_id,
-                        input.group,
-                        query_pattern=input.query_pattern,
-                        user_role=input.user_role,
-                        calls_count=input.calls_count,
-                        action=input.action,
-                        replace_calls=input.replace_calls,
-                        with_lock=False,
-                    )
+        with suppress(SchedulerAlreadyRunningError):
+            self.scheduler.start(paused=True)
+        if (self := await super().start()).storage.is_nested:
+            return self
 
-                # notify_end = self.NOTIFY_SUBSCRIPTION_END
-                # async for user in await self.storage.Session.stream_scalars(
-                #     select(UserModel).filter(
-                #         UserModel.role <= UserRole.USER,
-                #         UserModel.subscription_from.is_not(None),
-                #         UserModel.subscription_period.is_not(None),
-                #         UserModel.subscription_from
-                #         > text(
-                #             "DATETIME({}, 'unixepoch')".format(
-                #                 cast(text(r"STRFTIME('%s', 'now')"), Integer)
-                #                 - UserModel.subscription_period
-                #                 + text(str(notify_end.total_seconds()))
-                #             )
-                #         ),
-                #     )
-                # ):
-                #     self.notify_subscription_end_job_init(user, notify_end)
+        settings: SettingsModel
+        settings = await self.storage.Session.get(SettingsModel, True)
+        self.input_create_listeners()
+        self.user_create_listeners(settings.notify_subscription_end)
+        for model, value in self.listeners.items():
+            for name, listeners in value.items():
+                for listener in listeners:
+                    listen(model, name, listener, propagate=True)
 
-                # await self.sender_job_init(self.SEND_INTERVAL)
-                # await self.warmup_job_init(self.WARMUP_INTERVAL)
-                await self.storage.Session.remove()
-            self.scheduler.resume()
+        async for input in await self.storage.Session.stream_scalars(
+            select(InputModel).filter_by(success=None)
+        ):
+            self.add_input_handler(
+                input.chat_id,
+                input.group,
+                query_pattern=input.query_pattern,
+                user_role=input.user_role,
+                calls_count=input.calls_count,
+                action=input.action,
+                replace_calls=input.replace_calls,
+            )
+
+        async for user in await self.storage.Session.stream_scalars(
+            select(UserModel).filter(
+                UserModel.role <= UserRole.USER,
+                UserModel.subscription_from.is_not(None),
+                UserModel.subscription_period.is_not(None),
+                UserModel.subscription_from
+                > now()
+                - UserModel.subscription_period
+                + settings.notify_subscription_end,
+            )
+        ):
+            self.notify_subscription_end_job_init(
+                user, settings.notify_subscription_end
+            )
+
+        self.sender_job_init(settings.send_interval)
+        self.warmup_job_init(settings.warmup_interval)
+        await self.storage.Session.remove()
+        self.scheduler.resume()
+        return self
 
     async def stop(self: Self, /) -> Self:
         try:
@@ -270,6 +362,7 @@ class AdBotClient(Commands, Messages, Methods, Client):
                     phone_number,
                     self.api_id,
                     self.storage.Session or self.storage.engine,
+                    self.storage.metadata,
                 )
             if 'scheduler' not in kwargs:
                 kwargs['scheduler'] = self.scheduler

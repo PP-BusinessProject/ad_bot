@@ -8,13 +8,13 @@ from dateutil.tz.tz import tzlocal
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.relationships import RelationshipProperty
-from sqlalchemy.sql.expression import ClauseElement, cast, text
+from sqlalchemy.sql.expression import ClauseElement, and_, or_
+from sqlalchemy.sql.functions import now
 from sqlalchemy.sql.schema import Column, ForeignKey
-from sqlalchemy.sql.sqltypes import BigInteger, DateTime, Integer, String
+from sqlalchemy.sql.sqltypes import BigInteger, DateTime, Enum, Integer, String
 from typing_extensions import Self
 
 from .._mixins import Timestamped
-from .._types import IntEnum as IntEnumColumn
 from ..base_interface import Base
 from ..misc.subscription_model import SubscriptionModel
 
@@ -29,12 +29,11 @@ class UserRole(IntEnum):
     SUPPORT: Final[int] = auto()
     ADMIN: Final[int] = auto()
 
-    @classmethod
     @property
-    def name(cls: Type[Self], /) -> str:
-        if cls.value == cls.ADMIN.value:
+    def name(self: Self, /) -> str:
+        if self == self.ADMIN:
             return 'администратор'
-        elif cls.value == cls.SUPPORT.value:
+        elif self == self.SUPPORT:
             return 'саппорт'
         else:
             return 'пользователь'
@@ -91,7 +90,7 @@ class UserModel(Timestamped, Base):
     )
     role: Final[Column[UserRole]] = Column(
         'Role',
-        IntEnumColumn(UserRole),
+        Enum(UserRole),
         nullable=False,
         default=UserRole.USER,
         key='role',
@@ -133,8 +132,18 @@ class UserModel(Timestamped, Base):
         ),
         key='subscription_period',
     )
+    subscription: Final[
+        'RelationshipProperty[Optional[SubscriptionModel]]'
+    ] = relationship(
+        'SubscriptionModel',
+        back_populates='users',
+        lazy='noload',
+        cascade='save-update',
+        uselist=False,
+    )
     bots: Final['RelationshipProperty[list[BotModel]]'] = relationship(
         'BotModel',
+        back_populates='owner',
         lazy='noload',
         cascade='save-update, merge, expunge, delete, delete-orphan',
         uselist=True,
@@ -153,16 +162,11 @@ class UserModel(Timestamped, Base):
     @is_subscribed.expression
     def is_subscribed(cls: Type[Self], /) -> ClauseElement:  # noqa: N805
         """Check that user :meth:`.is_subscribed`."""
-        return (cls.role >= UserRole.SUPPORT) | (
-            cls.subscription_from.is_not(None)
-            & cls.subscription_period.is_not(None)
-            & (
-                cls.subscription_from
-                > text(
-                    "DATETIME({}, 'unixepoch')".format(
-                        cast(text(r"STRFTIME('%s', 'now')"), Integer)
-                        - cls.subscription_period
-                    )
-                )
-            )
+        return or_(
+            cls.role >= UserRole.SUPPORT,
+            and_(
+                cls.subscription_from.is_not(None),
+                cls.subscription_period.is_not(None),
+                cls.subscription_from > now() - cls.subscription_period,
+            ),
         )

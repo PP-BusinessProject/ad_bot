@@ -56,7 +56,7 @@ class PeerModel(Timestamped, Base):
     )
     phone_number: Final[Column[Optional[str]]] = Column(
         'PhoneNumber',
-        String,
+        BigInteger,
         key='phone_number',
     )
     session: Final['RelationshipProperty[SessionModel]'] = relationship(

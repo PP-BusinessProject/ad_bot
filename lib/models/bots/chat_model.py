@@ -4,25 +4,25 @@ from datetime import timedelta
 from enum import IntEnum, auto
 from typing import TYPE_CHECKING, Final, Optional, Type
 
-from pyrogram.errors import (
-    ChannelBanned,
-    ChannelInvalid,
-    ChannelPrivate,
-    ChatAdminRequired,
-    ChatWriteForbidden,
+from pyrogram.errors.exceptions.flood_420 import (
     SlowmodeWait,
 )
+from pyrogram.errors.exceptions.forbidden_403 import ChatWriteForbidden
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.expression import ClauseElement
 from sqlalchemy.sql.schema import Column, ForeignKey
-from sqlalchemy.sql.sqltypes import BigInteger, Boolean, String
+from sqlalchemy.sql.sqltypes import BigInteger, Boolean, String, Interval, Enum
 from typing_extensions import Self
-
+from pyrogram.errors.exceptions.bad_request_400 import (
+    PeerIdInvalid,
+    ChannelBanned,
+    ChannelInvalid,
+    ChannelPrivate,
+    ChatAdminRequired,
+)
 from .._mixins import Timestamped
-from .._types import IntEnum as IntEnumColumn
-from .._types import TimeDelta
 from ..base_interface import Base
 from ..misc.category_model import CategoryModel
 
@@ -34,6 +34,7 @@ class ChatDeactivatedCause(IntEnum):
     """The cause of the deactivation of the sender chat."""
 
     UNKNOWN: Final[int] = 0
+    PEER_INVALID: Final[int] = auto()
     SLOWMODE: Final[int] = auto()
     INVALID: Final[int] = auto()
     BANNED: Final[int] = auto()
@@ -44,7 +45,9 @@ class ChatDeactivatedCause(IntEnum):
     @classmethod
     def from_exception(cls: Type[Self], exception: BaseException, /) -> Self:
         """Return this cause from probable exception."""
-        if isinstance(exception, SlowmodeWait):
+        if isinstance(exception, PeerIdInvalid):
+            return cls.PEER_INVALID
+        elif isinstance(exception, SlowmodeWait):
             return cls.SLOWMODE
         elif isinstance(exception, ChannelInvalid):
             return cls.INVALID
@@ -134,7 +137,7 @@ class ChatModel(Timestamped, Base):
     )
     period: Final[Column[timedelta]] = Column(
         'Period',
-        TimeDelta,
+        Interval(second_precision=True),
         nullable=False,
         default=timedelta(minutes=20),
         key='period',
@@ -148,7 +151,7 @@ class ChatModel(Timestamped, Base):
     )
     deactivated_cause: Final[Column[Optional[ChatDeactivatedCause]]] = Column(
         'DeactivatedCause',
-        IntEnumColumn(ChatDeactivatedCause),
+        Enum(ChatDeactivatedCause),
         key='deactivated_cause',
     )
     category: Final[

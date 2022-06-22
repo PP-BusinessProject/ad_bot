@@ -82,18 +82,18 @@ class BotModel(Timestamped, Base):
             The ads that belong to this bot. If any were fetched yet.
     """
 
+    owner_id: Final[Column[int]] = Column(
+        'OwnerId',
+        UserModel.id.type,
+        ForeignKey(UserModel.id, onupdate='CASCADE', ondelete='CASCADE'),
+        primary_key=True,
+        key='owner_id',
+    )
     id: Final[Column[int]] = Column(
         'Id',
         Integer,
         primary_key=True,
         key='id',
-    )
-    owner_id: Final[Column[int]] = Column(
-        'OwnerId',
-        UserModel.id.type,
-        ForeignKey(UserModel.id, onupdate='CASCADE', ondelete='CASCADE'),
-        nullable=False,
-        key='owner_id',
     )
     forward_to_id: Final[Column[int]] = Column(
         'ForwardToId',

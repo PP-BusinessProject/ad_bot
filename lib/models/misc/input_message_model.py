@@ -1,4 +1,4 @@
-"""The module with :class:`UsedMessage`."""
+"""The module with :class:`InputMessageModel`."""
 
 from __future__ import annotations
 

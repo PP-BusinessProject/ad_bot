@@ -9,7 +9,17 @@ from logging import Logger
 from os import remove
 from os.path import isfile
 from struct import pack
-from typing import Final, Optional, Tuple, Type, TypeVar, Union
+from typing import (
+    Awaitable,
+    Callable,
+    Final,
+    Optional,
+    ParamSpec,
+    Tuple,
+    Type,
+    TypeVar,
+    Union,
+)
 
 from dateutil.tz.tz import tzlocal
 from pyrogram.raw.types.input_peer_channel import InputPeerChannel
@@ -27,15 +37,18 @@ from sqlalchemy.inspection import inspect
 from sqlalchemy.orm.scoping import scoped_session
 from sqlalchemy.orm.session import Session as SyncSession
 from sqlalchemy.orm.session import sessionmaker
-from sqlalchemy.sql.expression import delete, select
+from sqlalchemy.sql.expression import delete, exists, select
 from sqlalchemy.sql.schema import Column, MetaData
-from typing_extensions import Self
+from typing_extensions import _SpecialForm, Self
 
+from .ad_bot_auth import AdBotAuth
+from .models.misc.settings_model import SettingsModel
 from .models.sessions.peer_model import PeerModel
 from .models.sessions.session_model import SessionModel
 from .utils.pyrogram import get_input_peer
 
 #
+P = ParamSpec('P')
 T = TypeVar('T')
 
 
@@ -106,8 +119,11 @@ class SQLAlchemyStorage(Storage):
     async def open(self: Self, /) -> None:
         if self.is_nested:
             return
-        async with (conn := await self.Session.connection()).begin_nested():
-            await conn.run_sync(self.metadata.create_all)
+        async with self.engine.begin() as connection:
+            await connection.run_sync(self.metadata.create_all)
+        if await self.Session.scalar(select(~exists(SettingsModel))):
+            self.Session.add(SettingsModel())
+            await self.Session.commit()
 
     async def save(self: Self, /) -> None:
         pass
@@ -128,25 +144,25 @@ class SQLAlchemyStorage(Storage):
     async def update_peers(
         self: Self,
         /,
-        peers: list[Tuple[int, int, str, str, str]],
+        peers: list[Tuple[int, int, str, str, int]],
     ) -> None:
         if not peers:
             return
         peer_mapper, statement = inspect(PeerModel), insert(PeerModel)
         await self.Session.execute(
             statement.on_conflict_do_update(
-                index_elements=[c.name for c in peer_mapper.primary_key],
+                index_elements=[col.name for col in peer_mapper.primary_key],
                 set_={
-                    col.name: statement.excluded[col.key]
-                    for col in peer_mapper.columns
-                    if col not in peer_mapper.primary_key
-                    and col != peer_mapper.c.created_at
+                    column.name: statement.excluded[column.key]
+                    for column in peer_mapper.columns
+                    if column not in peer_mapper.primary_key
+                    and column != peer_mapper.columns.created_at
                 },
             ),
             [
                 dict(
                     zip(
-                        peer_mapper.c.keys()[:-2],
+                        peer_mapper.columns.keys()[:-2],
                         (self.phone_number, *peer),
                     )
                 )
@@ -188,7 +204,7 @@ class SQLAlchemyStorage(Storage):
     ) -> Union[InputPeerUser, InputPeerChat, InputPeerChannel]:
         peer_query = select(PeerModel).filter_by(
             session_phone_number=self.phone_number,
-            phone_number=phone_number,
+            phone_number=int(phone_number.removeprefix('+')),
         )
         if (peer := await self.Session.scalar(peer_query)) is None:
             raise KeyError(f'Phone number not found: {phone_number}')
@@ -291,3 +307,16 @@ class SQLAlchemyStorage(Storage):
             .decode()
             .rstrip('=')
         )
+
+    def scoped(
+        self: Self,
+        callable: Callable[P, Awaitable[T]],
+        /,
+    ) -> Callable[P, Awaitable[T]]:
+        async def _callable(*args: P.args, **kwargs: P.kwargs) -> T:
+            try:
+                return await callable(*args, **kwargs)
+            finally:
+                await self.Session.remove()
+
+        return _callable

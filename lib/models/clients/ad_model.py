@@ -2,9 +2,13 @@
 
 from typing import (
     TYPE_CHECKING,
+    Any,
+    Dict,
     Final,
     Optional,
+    Tuple,
     Type,
+    Union,
 )
 
 from sqlalchemy import ForeignKey
@@ -12,7 +16,7 @@ from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.expression import ClauseElement, and_
-from sqlalchemy.sql.schema import Column
+from sqlalchemy.sql.schema import Column, ForeignKeyConstraint, SchemaItem
 from sqlalchemy.sql.sqltypes import Boolean, Integer
 from typing_extensions import Self
 
@@ -67,10 +71,15 @@ class AdModel(Timestamped, Base):
             database.
     """
 
+    bot_owner_id: Final[Column[int]] = Column(
+        'BotOwnerId',
+        BotModel.owner_id.type,
+        nullable=False,
+        key='bot_owner_id',
+    )
     bot_id: Final[Column[int]] = Column(
         'BotId',
         BotModel.id.type,
-        ForeignKey(BotModel.id, onupdate='CASCADE', ondelete='CASCADE'),
         nullable=False,
         key='bot_id',
     )
@@ -87,10 +96,10 @@ class AdModel(Timestamped, Base):
         key='message_id',
     )
     category_id: Final[Column[Optional[int]]] = Column(
-        'Category',
+        'CategoryId',
         CategoryModel.id.type,
         ForeignKey(CategoryModel.id, onupdate='CASCADE', ondelete='SET NULL'),
-        key='category',
+        key='category_id',
     )
     confirm_message_id: Column[Optional[int]] = Column(
         'ConfirmMessageId',
@@ -140,6 +149,15 @@ class AdModel(Timestamped, Base):
         lazy='noload',
         cascade='save-update, merge, expunge, delete, delete-orphan',
         uselist=True,
+    )
+
+    __table_args__: Final[Tuple[Union[SchemaItem, Dict[str, Any]], ...]] = (
+        ForeignKeyConstraint(
+            [bot_owner_id, bot_id],
+            [BotModel.owner_id, BotModel.id],
+            onupdate='CASCADE',
+            ondelete='CASCADE',
+        ),
     )
 
     @hybrid_property
