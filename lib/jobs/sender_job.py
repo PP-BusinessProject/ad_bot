@@ -213,8 +213,8 @@ class SenderJob(object):
                     )
                 )
                 if ad.category_id is not None:
-                    chat_query = chat_query.filter_by(
-                        category_id=ad.category_id
+                    chat_query = chat_query.where(
+                        ChatModel.category_id == ad.category_id
                     )
 
                 try:
