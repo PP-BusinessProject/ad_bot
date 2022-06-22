@@ -208,12 +208,12 @@ class AdMessage(object):
             )
             if not isinstance(result, CategoryModel):
                 return result
-            ad.category = result
+            ad.category_id = result.id
             data = data.__copy__(kwargs=data.kwargs | dict(s=None))
             await self.storage.Session.commit()
 
         elif data.command == self.AD.CATEGORY_DELETE:
-            ad.category = None
+            ad.category_id = None
             await self.storage.Session.commit()
 
         elif data.command == self.AD.DELETE:

@@ -220,11 +220,11 @@ class ChatMessage(object):
             return await abort('Чат не найден.')
 
         elif data.command == self.SENDER_CHAT.CATEGORY:
-            chat.category = result
+            chat.category_id = result.id
             await self.storage.Session.commit()
 
         elif data.command == self.SENDER_CHAT.REMOVE_CATEGORY:
-            chat.category = None
+            chat.category_id = None
             await self.storage.Session.commit()
 
         elif data.command == self.SENDER_CHAT.REFRESH:
