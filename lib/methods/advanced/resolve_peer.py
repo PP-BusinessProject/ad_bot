@@ -3,10 +3,9 @@
 from re import sub
 from typing import TYPE_CHECKING, Union
 
-from pyrogram.errors.exceptions.bad_request_400 import (
-    ChannelInvalid,
-    PeerIdInvalid,
-)
+from pyrogram.errors.exceptions.bad_request_400 import (BadRequest,
+                                                        ChannelInvalid,
+                                                        PeerIdInvalid)
 from pyrogram.raw.functions.channels.get_channels import GetChannels
 from pyrogram.raw.functions.contacts.resolve_username import ResolveUsername
 from pyrogram.raw.functions.messages.get_chats import GetChats
@@ -141,10 +140,10 @@ class ResolvePeer(object):
                     if not force and not fetch:
                         raise PeerIdInvalid from e
 
-                    await self.invoke(ResolveUsername(username=peer_id))
                     try:
+                        await self.invoke(ResolveUsername(username=peer_id))
                         return await self.storage.get_peer_by_username(peer_id)
-                    except KeyError as e:
+                    except (KeyError, BadRequest) as e:
                         raise PeerIdInvalid from e
             else:
                 try:
