@@ -2,7 +2,7 @@
 
 from contextlib import suppress
 from datetime import datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Optional
 
 from apscheduler.job import Job
 from apscheduler.triggers.interval import IntervalTrigger
@@ -23,6 +23,7 @@ from pyrogram.errors.exceptions.bad_request_400 import (
     MsgIdInvalid,
 )
 from pyrogram.errors.rpc_error import RPCError
+from pyrogram.types.user_and_chats.chat import Chat
 from sqlalchemy.exc import IntegrityError, MissingGreenlet
 from sqlalchemy.future import select
 from sqlalchemy.orm import contains_eager, selectinload, with_parent
@@ -188,11 +189,15 @@ class SenderJob(object):
             ):
                 if ad.category_id in checked_empty_categories:
                     continue
-                chat_query = (
+
+                _chat: Optional[Chat] = None
+                async for chat in await self.storage.Session.stream_scalars(
                     select(ChatModel)
                     .join(SentAdModel, isouter=True)
                     .filter(
                         ChatModel.valid,
+                        ad.category_id is None
+                        or ChatModel.category_id == ad.category_id,
                         or_(
                             SentAdModel.ad_chat_id.is_(None),
                             SentAdModel.ad_message_id.is_(None),
@@ -212,43 +217,47 @@ class SenderJob(object):
                         .scalar_subquery(),
                         SentAdModel.timestamp,
                     )
-                )
-                if ad.category_id is not None:
-                    chat_query = chat_query.where(
-                        ChatModel.category_id == ad.category_id
-                    )
-
-                try:
-                    async for chat in worker.iter_check_chats(
-                        (
-                            chat.id,
-                            chat.invite_link,
-                            f'@{chat.username}' if chat.username else None,
-                        )
-                        async for chat in (
-                            await self.storage.Session.stream_scalars(
-                                chat_query
+                ):
+                    try:
+                        if _chat := await worker.check_chats(
+                            (
+                                chat.id,
+                                chat.invite_link,
+                                f'@{chat.username}' if chat.username else None,
                             )
+                        ):
+                            break
+                    except ValueError:
+                        pass
+                    except FloodWait:
+                        break
+                    except Unauthorized:
+                        await revoke(worker)
+                        break
+                    except (
+                        PeerIdInvalid,
+                        SlowmodeWait,
+                        ChannelBanned,
+                        ChannelPrivate,
+                        ChatAdminRequired,
+                        ChatWriteForbidden,
+                    ) as e:
+                        chat.active = False
+                        chat.deactivated_cause = (
+                            ChatDeactivatedCause.from_exception(e)
                         )
-                    ):
-                        if chat is not None:
-                            break
-                    else:
-                        if ad.category_id is None:
-                            break
-                        checked_empty_categories.add(ad.category_id)
+                        await self.storage.Session.commit()
+                    except RPCError as _:
                         continue
-                except FloodWait:
+
+                if _chat is None:
+                    if ad.category_id is not None:
+                        checked_empty_categories.add(ad.category_id)
                     break
-                except Unauthorized:
-                    await revoke(worker)
-                    break
-                except (ValueError, RPCError):
-                    continue
 
                 try:
                     sent_msg = await worker.forward_messages(
-                        *(chat.id, ad.chat_id, ad.message_id),
+                        *(_chat.id, ad.chat_id, ad.message_id),
                         drop_author=True,
                     )
                     sent_ad = SentAdModel(
@@ -259,11 +268,6 @@ class SenderJob(object):
                         link=sent_msg.link,
                         timestamp=sent_msg.date.replace(tzinfo=tzlocal()),
                     )
-                    # print(
-                    #     f'{sent_ad.ad_chat_id}:{sent_ad.ad_message_id}',
-                    #     f'{chat.title}',
-                    #     sep=' => ',
-                    # )
                     with suppress(IntegrityError):
                         self.storage.Session.add(sent_ad)
                         await self.storage.Session.commit()
@@ -278,10 +282,9 @@ class SenderJob(object):
                     ChatAdminRequired,
                     ChatWriteForbidden,
                 ) as e:
-                    deactivated = ChatDeactivatedCause.from_exception(e)
-                    values = dict(active=False, deactivated_cause=deactivated)
-                    await self.storage.Session.execute(
-                        update(ChatModel, ChatModel.id == chat.id, values)
+                    chat.active = False
+                    chat.deactivated_cause = (
+                        ChatDeactivatedCause.from_exception(e)
                     )
                     await self.storage.Session.commit()
                 except Unauthorized:
