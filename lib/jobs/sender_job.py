@@ -22,6 +22,7 @@ from pyrogram.errors.exceptions.bad_request_400 import (
     MessageIdInvalid,
     MsgIdInvalid,
 )
+from pyrogram.errors.rpc_error import RPCError
 from sqlalchemy.exc import IntegrityError, MissingGreenlet
 from sqlalchemy.future import select
 from sqlalchemy.orm import contains_eager, selectinload, with_parent
@@ -237,13 +238,13 @@ class SenderJob(object):
                             break
                         checked_empty_categories.add(ad.category_id)
                         continue
-                except ValueError:
-                    continue
                 except FloodWait:
                     break
                 except Unauthorized:
                     await revoke(worker)
                     break
+                except (ValueError, RPCError):
+                    continue
 
                 try:
                     sent_msg = await worker.forward_messages(
