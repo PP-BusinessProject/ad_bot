@@ -411,7 +411,10 @@ class AdMessage(object):
                 )
                 + (
                     [
-                        [IKB('Просмотреть', _query(self.AD.VIEW))],
+                        [
+                            IKB('Обновить', _query(self.AD.PAGE)),
+                            IKB('Просмотреть', _query(self.AD.VIEW)),
+                        ],
                         (
                             [
                                 IKB(
