@@ -58,13 +58,19 @@ class ServiceHelp(object):
             If the :meth:`CallbackQuery.answer` was successful, and the
             messages used in the service and/or user chats.
         """
-        if isinstance(chat_id, InputModel):
-            chat_id = chat_id.chat_id
-        if isinstance(message_id, Message):
-            message_id = message_id.id
 
-        async def abort(text: str, /) -> Union[bool, Message]:
-            return await self.answer_edit_send(query_id, chat_id, text=text)
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
 
         async def abort_not_found() -> Union[bool, Message]:
             if data is None or data.args and data.args[0] == chat_id:
@@ -77,6 +83,11 @@ class ServiceHelp(object):
                 return await abort('Пользователь не найден.')
             else:
                 return await abort('Произошла ошибка.')
+
+        if isinstance(chat_id, InputModel):
+            chat_id = chat_id.chat_id
+        if isinstance(message_id, Message):
+            message_id = message_id.id
 
         if data is None or data.command == self.HELP._SELF:
             user: UserModel = await self.storage.Session.get(
@@ -176,16 +187,14 @@ class ServiceHelp(object):
                 return await abort_not_found()
 
             elif user.help_message_id is None:
-                return await self.answer_edit_send(
-                    *(query_id, chat_id),
-                    text='\n'.join(
+                return await abort(
+                    '\n'.join(
                         (
                             'Ваша заявка уже отменена.',
                             'Чтобы оставить новую заявку воспользуйтесь меню '
                             'ниже.',
                         )
-                    ),
-                    show_alert=True,
+                    )
                 )
 
             help_message_id = int(user.help_message_id)
@@ -193,16 +202,14 @@ class ServiceHelp(object):
             await self.storage.Session.commit()
 
             return (
-                await self.answer_edit_send(
-                    *(query_id, chat_id),
-                    show_alert=True,
-                    text='\n'.join(
+                await abort(
+                    '\n'.join(
                         (
                             'Ваша заявка успешно отменена.',
                             'Чтобы оставить новую заявку воспользуйтесь меню '
                             'ниже.',
                         )
-                    ),
+                    )
                 ),
                 await self.edit_message_reply_markup(
                     user.service_id, help_message_id
@@ -228,18 +235,32 @@ class ServiceHelp(object):
         query_id: Optional[int] = None,
     ) -> bool:
         """Write down user questions and contact for his request."""
-        if not isinstance(chat_id, InputModel):
-            raise NotImplementedError('This method works only with inputs.')
-        input, chat_id = chat_id, chat_id.chat_id
 
-        async def abort(text: str, /) -> bool:
-            used = await self.answer_edit_send(query_id, chat_id, text=text)
-            if isinstance(used, Message):
+        async def abort(
+            text: str,
+            /,
+            *,
+            add: bool = False,
+            show_alert: bool = True,
+        ) -> bool:
+            nonlocal self, query_id, chat_id, input
+            message = await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+            if add and isinstance(message, Message):
                 self.storage.Session.add(
-                    InputMessageModel.from_message(used, input)
+                    InputMessageModel.from_message(message, input)
                 )
                 await self.storage.Session.commit()
-            return False
+            return not add
+
+        if not isinstance(chat_id, InputModel):
+            return await abort(
+                'Связаться с администрацией можно только через сообщение.'
+            )
+        input, chat_id = chat_id, chat_id.chat_id
 
         if message_id is None:
             return True
@@ -248,7 +269,10 @@ class ServiceHelp(object):
 
         if message.contact is None:
             if not message.text:
-                return await abort('Контакт не найден. Попробуйте еще раз.')
+                return await abort(
+                    'Контакт не найден. Попробуйте еще раз.',
+                    add=True,
+                )
 
             qs = literal_eval(input.data.kwargs.get('questions', str(())))
             qs += (message.text,)
@@ -256,15 +280,19 @@ class ServiceHelp(object):
                 kwargs=input.data.kwargs | dict(questions=qs)
             )
             return await abort(
-                f'Ваш вопрос записан. Всего вопросов: {len(qs)}.'
+                f'Ваш вопрос записан. Всего вопросов: {len(qs)}.',
+                add=True,
             )
 
         elif message.contact.user_id != chat_id:
-            return await abort('Это не ваш контакт. Повторите попытку.')
+            return await abort(
+                'Это не ваш контакт. Повторите попытку.',
+                add=True,
+            )
 
         user = await self.storage.Session.get(UserModel, chat_id)
         if user is None:
-            return not await abort(
+            return await abort(
                 'Вы не зарегистрированы, чтобы зарегистрироваться '
                 'напишите **/start**.',
             )
@@ -345,23 +373,32 @@ class ServiceHelp(object):
         data: Optional[Query] = None,
         query_id: Optional[int] = None,
     ):
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+
         input: Optional[InputModel] = None
         if isinstance(chat_id, InputModel):
             input, chat_id = chat_id, chat_id.chat_id
 
-        answer = await self.answer_edit_send(
-            *(query_id, chat_id),
-            text='Вы успешно оставили заявку на связь с администрацией.'
-            if input.success
-            else 'Заявка не была оставлена.',
-        )
         return (
             (
-                answer,
+                await abort(
+                    'Вы успешно оставили заявку на связь с администрацией.'
+                ),
                 await self.start_message(
                     input or chat_id, message_id, data, query_id
                 ),
             )
             if input.success
-            else answer
+            else await abort('Заявка не была оставлена.')
         )

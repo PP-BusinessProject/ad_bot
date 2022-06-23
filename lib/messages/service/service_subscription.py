@@ -38,6 +38,20 @@ class ServiceSubscription(object):
         query_id: Optional[int] = None,
     ):
         """Provide a user subscription from `SUBSCRIPTIONS`."""
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+
         if isinstance(_message_id := message_id, Message):
             message_id = message_id.id
         if isinstance(chat_id, InputModel):
@@ -46,18 +60,6 @@ class ServiceSubscription(object):
                 message_id = input.message_id
             if input.data is not None:
                 data = input.data(self.SUBSCRIPTION.VIEW)
-
-        async def abort(text: str, /, *, show_alert: bool = False):
-            _ = await self.answer_edit_send(
-                *(query_id, chat_id),
-                **dict(text=text, show_alert=show_alert),
-            )
-            if isinstance(chat_id, InputModel) and isinstance(_, Message):
-                self.storage.Session.add(
-                    InputMessageModel.from_message(_, chat_id)
-                )
-                await self.storage.Session.commit()
-            return _
 
         def _query(
             command: str,
@@ -151,8 +153,7 @@ class ServiceSubscription(object):
                 await abort(
                     'Заявка была успешно выслана заново.'
                     if subscription_msg[-1] is not None
-                    else 'Заявка была успешно отправлена администратору.',
-                    show_alert=True,
+                    else 'Заявка была успешно отправлена администратору.'
                 ),
             )
 
@@ -297,8 +298,25 @@ class ServiceSubscription(object):
 
         `InputModel` must have a user argument provided!
         """
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+
         if not isinstance(chat_id, InputModel):
-            raise NotImplementedError('This method works only with inputs.')
+            return await abort(
+                'Написать причину отклонения заявки можно только через '
+                'сообщение.'
+            )
         input, chat_id = chat_id, chat_id.chat_id
         if isinstance(_message_id := message_id, Message):
             message_id = message_id.id

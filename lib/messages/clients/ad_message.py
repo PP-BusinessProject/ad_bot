@@ -59,6 +59,30 @@ class AdMessage(object):
         Returns:
             The sent message with requested ad.
         """
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id, message_id, _query(self.AD.PAGE)),
+                text=text,
+                show_alert=show_alert,
+            )
+
+        def _query(command: str, /) -> Query:
+            nonlocal data, ad, page_index
+            if data is not None:
+                return data(
+                    command=command,
+                    args=(ad.chat_id, ad.message_id),
+                    kwargs=data.kwargs | dict(a_p=page_index),
+                )
+            return Query(command, ad.chat_id, ad.message_id, a_p=page_index)
+
         if isinstance(chat_id, InputModel):
             input, chat_id = chat_id, chat_id.chat_id
             if input.message_id is not None:
@@ -74,10 +98,7 @@ class AdMessage(object):
                     exists(text('NULL')).where(InputModel.chat_id == chat_id)
                 )
             ):
-                return await self.answer_edit_send(
-                    *(query_id, chat_id),
-                    text='Вы уже добавляете объявление.',
-                )
+                return await abort('Вы уже добавляете объявление.')
 
             self.storage.Session.add(
                 InputModel(
@@ -99,21 +120,6 @@ class AdMessage(object):
                     [[IKB('Отменить', Query(self.INPUT.CANCEL))]]
                 ),
             )
-
-        async def abort(text: str, /) -> Optional[Message]:
-            return await self.answer_edit_send(
-                query_id, chat_id, message_id, _query(self.AD.PAGE), text
-            )
-
-        def _query(command: str, /) -> Query:
-            nonlocal data
-            if data is not None:
-                return data(
-                    command=command,
-                    args=(ad.chat_id, ad.message_id),
-                    kwargs=data.kwargs | dict(a_p=page_index),
-                )
-            return Query(command, ad.chat_id, ad.message_id, a_p=page_index)
 
         page_index = data.kwargs.get('a_p') if data is not None else None
         if not isinstance(page_index, int):
@@ -498,39 +504,56 @@ class AdMessage(object):
         Returns:
             If update was successful, returns True. Otherwise, False.
         """
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            add: bool = False,
+            show_alert: bool = True,
+        ) -> bool:
+            nonlocal self, query_id, chat_id, input
+            message = await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+            if add and isinstance(message, Message):
+                self.storage.Session.add(
+                    InputMessageModel.from_message(message, input)
+                )
+                await self.storage.Session.commit()
+            return not add
+
         if not isinstance(chat_id, InputModel):
-            raise NotImplementedError('This method works only with inputs.')
+            return await abort(
+                'Добавить объявление возможно только через сообщение.'
+            )
         input, chat_id = chat_id, chat_id.chat_id
         if isinstance(message_id, Message):
             message_id = message_id.id
-
-        async def abort(text: str, /) -> Union[bool, Message]:
-            return await self.answer_edit_send(*(query_id, chat_id), text=text)
 
         bot: Optional[BotModel] = await self.storage.Session.get(
             BotModel, input.data.args
         )
         if bot is None:
-            await abort('Бот не найден.')
-            return True
+            return await abort('Бот не найден.')
 
         elif bot.owner.service_id is None:
-            await abort(
+            return await abort(
                 'Личный канал пользователя не создан.'
                 if chat_id != bot.owner_id
                 else 'У вас нет личного канала.'
             )
-            return True
 
         elif not await self.check_chats(
             (bot.owner.service_id, bot.owner.service_invite)
         ):
-            await abort(
+            return await abort(
                 'У бота нет доступа к личному каналу пользователя.'
                 if chat_id != bot.owner_id
                 else 'У бота нет доступа к вашему личному каналу.'
             )
-            return True
 
         elif bot.owner.service_invite is None:
             invite_link = await self.export_chat_invite_link(
@@ -543,15 +566,10 @@ class AdMessage(object):
             copied_message = await self.forward_messages(
                 bot.owner.service_id, chat_id, message_id
             )
-        except RPCError:
-            text = 'Произошла ошибка, попробуйте еще раз.'
-            used = await self.answer_edit_send(chat_id=chat_id, text=text)
-            if isinstance(used, Message):
-                self.storage.Session.add(
-                    InputMessageModel.from_message(used, input)
-                )
-            await self.storage.Session.commit()
-            return False
+        except RPCError as _:
+            return await abort(
+                'Произошла ошибка, попробуйте еще раз.', add=True
+            )
 
         confirm_message_id: Optional[int] = None
         if not (chat_id != bot.owner.id or bot.owner.role >= UserRole.SUPPORT):
@@ -574,10 +592,8 @@ class AdMessage(object):
                 ),
             )
             confirm_message_id = confirm_message.id
-            await self.answer_edit_send(
-                *(query_id, input.chat_id),
-                text='Ваше объявление отправлено на согласование с '
-                'администрацией.',
+            await abort(
+                'Ваше объявление отправлено на согласование с администрацией.'
             )
 
         self.storage.Session.add(

@@ -30,6 +30,20 @@ class ReplyToUser(object):
         query_id: Optional[int] = None,
     ) -> None:
         """Reply to user to navigate to the end client."""
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+
         if isinstance(chat_id, InputModel):
             chat_id = chat_id.chat_id
         if chat_id == 42777 or not self.storage.phone_number:
@@ -49,21 +63,28 @@ class ReplyToUser(object):
             message = await self.get_messages(chat_id, message_id)
 
         if chat_id == owner_bot.owner_id:
-            if message.reply_to_message is not None and (
-                not message.reply_to_message.empty
+            if message.reply_to_message is None or (
+                message.reply_to_message.forward_from is None
             ):
-                try:
-                    top_line = message.reply_to_message.text.splitlines()[0]
-                    await message.copy(int(top_line.split('ID#')[-1]))
-                except ValueError:
-                    return await self.answer_edit_send(
-                        'Пользователь для пересылки сообщения не распознан.'
-                    )
+                return await abort(
+                    'Пользователь для пересылки сообщения не распознан.',
+                )
+            try:
+                await self.forward_messages(
+                    message.reply_to_message.forward_from.id,
+                    *(chat_id, message_id),
+                    drop_author=True,
+                )
+            except RPCError as _:
+                return await abort(
+                    'Произошла ошибка при пересылке сообщения '
+                    'пользователю.',
+                )
 
         else:
             with suppress(RPCError):
                 await self.forward_messages(
-                    owner_bot.owner_id, chat_id, message_id
+                    owner_bot.forward_to_id, chat_id, message_id
                 )
             replied: bool = False
             try:

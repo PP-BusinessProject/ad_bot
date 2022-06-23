@@ -4,12 +4,10 @@ from contextlib import suppress
 from typing import TYPE_CHECKING, Optional, Union
 
 from pyrogram.errors.rpc_error import RPCError
-from pyrogram.raw.types.channel_participant_admin import (
-    ChannelParticipantAdmin,
-)
-from pyrogram.raw.types.channel_participant_creator import (
-    ChannelParticipantCreator,
-)
+from pyrogram.raw.types.channel_participant_admin import \
+    ChannelParticipantAdmin
+from pyrogram.raw.types.channel_participant_creator import \
+    ChannelParticipantCreator
 from pyrogram.types import InlineKeyboardButton as IKB
 from pyrogram.types import InlineKeyboardMarkup as IKM
 from pyrogram.types import Message
@@ -74,6 +72,20 @@ class BotMessage(object):
             * `~messages.users_message._user_page_text` for detailed info on
             how the page buttons with the user info are formed.
         """
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+
         if isinstance(chat_id, InputModel):
             chat_id = chat_id.chat_id
         if isinstance(message_id, Message):
@@ -90,11 +102,7 @@ class BotMessage(object):
             select(count()).where(UserModel.role < user_role)
         )
         if not users_count:
-            return await self.answer_edit_send(
-                *(query_id, chat_id),
-                text='На данный момент нет активных пользователей.',
-                show_alert=True,
-            )
+            return await abort('На данный момент нет активных пользователей.')
 
         def user_page_text(
             user: UserModel,
@@ -185,10 +193,6 @@ class BotMessage(object):
 
         This message can be seen from user's and admin's perspective.
         """
-        if isinstance(chat_id, InputModel):
-            chat_id = chat_id.chat_id
-        if isinstance(_message_id := message_id, Message):
-            message_id = message_id.id
 
         async def abort(
             text: str,
@@ -196,8 +200,11 @@ class BotMessage(object):
             *,
             show_alert: bool = True,
         ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
             return await self.answer_edit_send(
-                query_id, chat_id, text=text, show_alert=show_alert
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
             )
 
         def _query(command: str, /) -> Query:
@@ -208,6 +215,11 @@ class BotMessage(object):
                 args=(bot.owner.id, bot.id),
                 kwargs=(data.kwargs if data else {}) | dict(b_p=page_index),
             )
+
+        if isinstance(chat_id, InputModel):
+            chat_id = chat_id.chat_id
+        if isinstance(_message_id := message_id, Message):
+            message_id = message_id.id
 
         page_index, bot_owner_id, bot_id = None, None, None
         if data is not None:
@@ -416,15 +428,15 @@ class BotMessage(object):
                             await abort(
                                 'Вам успешно выдано права администратора для '
                                 'сервисного чата [пользователя]'
-                                f'(tg://user?id={bot.owner.id}).',
-                                show_alert=True,
+                                f'(tg://user?id={bot.owner.id}).'
+
                             )
                             break
             else:
                 return await abort(
                     'На данный момент нет свободного бота для добавления вас '
-                    'в сервисный чат пользователя. Попробуйте еще раз позже.',
-                    show_alert=True,
+                    'в сервисный чат пользователя. Попробуйте еще раз позже.'
+
                 )
 
         elif data.command == self.BOT.BAN:

@@ -66,6 +66,20 @@ class ChatMessage(object):
         Returns:
             The sent message with chats listed within pages.
         """
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+
         if isinstance(chat_id, InputModel):
             chat_id = chat_id.chat_id
         if isinstance(message_id, Message):
@@ -79,11 +93,7 @@ class ChatMessage(object):
             select(count()).select_from(ChatModel)
         )
         if not chats_count:
-            return await self.answer_edit_send(
-                *(query_id, chat_id),
-                text='На данный момент нет чатов для рассылки.',
-                show_alert=True,
-            )
+            return await abort('На данный момент нет чатов для рассылки.')
 
         page_list_size: int = await self.storage.Session.scalar(
             select(SettingsModel.page_list_size).where(
@@ -148,6 +158,20 @@ class ChatMessage(object):
 
         Only applicable for `UserRole.SUPPORT` and greater.
         """
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+
         if isinstance(message_id, Message):
             message_id = message_id.id
         if isinstance(chat_id, InputModel):
@@ -156,9 +180,6 @@ class ChatMessage(object):
                 message_id = input.message_id
             if input.data is not None:
                 data = input.data(self.SENDER_CHAT.PAGE)
-
-        async def abort(text: str, /) -> Union[bool, Message]:
-            return await self.answer_edit_send(query_id, chat_id, text=text)
 
         if data is None or data.command in (
             self.SENDER_CHAT._SELF,
@@ -450,22 +471,35 @@ class ChatMessage(object):
         data: Optional[Query] = None,
         query_id: Optional[int] = None,
     ) -> bool:
-        if not isinstance(chat_id, InputModel):
-            raise NotImplementedError('This method works only with inputs.')
-        input, chat_id = chat_id, chat_id.chat_id
-
-        async def abort(text: str, /) -> bool:
-            used = await self.answer_edit_send(query_id, chat_id, text=text)
-            if isinstance(used, Message):
+        async def abort(
+            text: str,
+            /,
+            *,
+            add: bool = False,
+            show_alert: bool = True,
+        ) -> bool:
+            nonlocal self, query_id, chat_id, input
+            message = await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+            if add and isinstance(message, Message):
                 self.storage.Session.add(
-                    InputMessageModel.from_message(used, input)
+                    InputMessageModel.from_message(message, input)
                 )
                 await self.storage.Session.commit()
-            return False
+            return not add
+
+        if not isinstance(chat_id, InputModel):
+            return await abort(
+                'Добавить период для чата возможно только через сообщение.'
+            )
+        input, chat_id = chat_id, chat_id.chat_id
 
         chat = await self.storage.Session.get(ChatModel, input.data.args)
         if chat is None:
-            return not await abort('Чат не найден.')
+            return await abort('Чат не найден.')
 
         if not isinstance(message_id, Message):
             message_id = await self.get_messages(chat_id, message_id)
@@ -477,7 +511,8 @@ class ChatMessage(object):
             numbers: list[float] = [float(_ or 0) for _ in raw_numbers]
         except ValueError:
             return await abort(
-                'Не удалось распознать введенные данные. Попробуйте еще раз.'
+                'Не удалось распознать введенные данные. Попробуйте еще раз.',
+                add=True,
             )
 
         fractions = ('days', 'hours', 'minutes', 'seconds')
@@ -496,8 +531,29 @@ class ChatMessage(object):
         query_id: Optional[int] = None,
     ) -> bool:
         """Update sender chats in the database taken from `message`."""
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            add: bool = False,
+            show_alert: bool = True,
+        ) -> bool:
+            nonlocal self, query_id, chat_id, input
+            message = await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+            if add and isinstance(message, Message):
+                self.storage.Session.add(
+                    InputMessageModel.from_message(message, input)
+                )
+                await self.storage.Session.commit()
+            return not add
+
         if not isinstance(chat_id, InputModel):
-            raise NotImplementedError('This method works only with inputs.')
+            return await abort('Добавить чаты можно только через сообщение.')
         input, chat_id = chat_id, chat_id.chat_id
         if isinstance(_message_id := message_id, Message):
             message_id = message_id.id
@@ -506,16 +562,6 @@ class ChatMessage(object):
             nonlocal input
             _kw = {k: v for k, v in input.data.kwargs.items() if k not in keys}
             input.data = input.data.__copy__(kwargs=_kw | kwargs)
-
-        async def abort(text: str, /) -> bool:
-            nonlocal input, query_id, chat_id
-            used = await self.answer_edit_send(query_id, chat_id, text=text)
-            if isinstance(used, Message):
-                self.storage.Session.add(
-                    InputMessageModel.from_message(used, input)
-                )
-                await self.storage.Session.commit()
-            return False
 
         if data is not None and data.command == self.SENDER_CHAT.REFRESH:
             refresh = not bool(input.data.kwargs.get('refresh'))
@@ -570,7 +616,9 @@ class ChatMessage(object):
                         break
             chat_links[line_links] = line_chat
         if not chat_links:
-            return await abort('Чатов не обнаружено. Попробуйте еще раз.')
+            return await abort(
+                'Чатов не обнаружено. Попробуйте еще раз.', add=True
+            )
 
         finish_message_id = input.data.kwargs.get('f_msg_id')
         if isinstance(finish_message_id, int):
@@ -605,7 +653,8 @@ class ChatMessage(object):
         check_chats = [k for k, v in chat_links.items() if v is None]
         if not check_chats:
             finish_message = await self._chats_add_notify(
-                *(input, n_message_id, total_count, existing, *_, *__),
+                *(input, n_message_id, data, query_id),
+                *(total_count, existing, *_, *__),
                 finish=True,
             )
             if isinstance(finish_message, Message):
@@ -618,7 +667,10 @@ class ChatMessage(object):
             trigger='interval',
             seconds=1,
             id=f'add_chats_add_notify:{chat_id}',
-            args=(input, n_message_id, total_count, existing, *_, *__),
+            args=(
+                *(input, n_message_id, data, query_id),
+                *(total_count, existing, *_, *__),
+            ),
             replace_existing=True,
         )
 
@@ -641,7 +693,7 @@ class ChatMessage(object):
             )
         }
         if not workers_flood:
-            return not await abort(
+            return await abort(
                 'На данный момент нет свободных ботов для обработки чатов.'
             )
 
@@ -725,7 +777,8 @@ class ChatMessage(object):
 
         can_update.value = False
         finish_message = await self._chats_add_notify(
-            *(input, n_message_id, total_count, existing, *_, *__),
+            *(input, n_message_id, data, query_id),
+            *(total_count, existing, *_, *__),
             finish=True,
         )
         finish_message_id = input.data.kwargs.get('n_msg_id')
@@ -733,7 +786,6 @@ class ChatMessage(object):
             finish_message_id = finish_message.id
         modify_kwargs('n_msg_id', f_msg_id=finish_message_id)
         await self.storage.Session.commit()
-
         return False
 
     async def _add_chats_on_finished(
@@ -744,8 +796,23 @@ class ChatMessage(object):
         data: Optional[Query] = None,
         query_id: Optional[int] = None,
     ):
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+
         if not isinstance(chat_id, InputModel):
-            raise NotImplementedError('This method works only with inputs.')
+            return await abort(
+                'Закончить добавление чатов можно только через сообщение.'
+            )
         input, chat_id = chat_id, chat_id.chat_id
 
         with suppress(JobLookupError):
@@ -776,6 +843,8 @@ class ChatMessage(object):
         self: 'AdBotClient',
         chat_id: Union[int, InputModel],
         message_id: Optional[Union[int, Message]],
+        data: Optional[Query],
+        query_id: Optional[int],
         /,
         total_chats: int,
         existing: Optional[int],
@@ -786,10 +855,26 @@ class ChatMessage(object):
         *,
         finish: bool = False,
     ) -> Optional[Message]:
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+
         if not finish and not can_update.value:
             return None
         elif not isinstance(chat_id, InputModel):
-            raise NotImplementedError('This method works only with inputs.')
+            return await abort(
+                'Обновить состояние добавления чатов можно только через '
+                'сообщение.'
+            )
         input, chat_id = chat_id, chat_id.chat_id
         if isinstance(message_id, Message):
             message_id = message_id.id

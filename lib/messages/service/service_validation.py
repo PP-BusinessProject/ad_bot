@@ -56,14 +56,24 @@ class ServiceValidation(object):
         Raises:
             ValueError, if the data argument is invalid.
         """
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+
         if isinstance(chat_id, InputModel):
             chat_id = chat_id.chat_id
         if isinstance(_message_id := message_id, Message):
             message_id = message_id.id
-        if not isinstance(data, Query):
-            raise ValueError(
-                '`data` argument of type `Query` must be provided.'
-            )
 
         elif data.command == self.SERVICE.HIDE:
             if message_id is not None:
@@ -72,18 +82,23 @@ class ServiceValidation(object):
 
         elif data.command in (self.SERVICE.APPROVE, self.SERVICE.DENY):
             if not data.args:
-                raise ValueError('`Query` arguments must be provided.')
+                return await abort('Команда для обработки не распознана.')
 
             elif data.args[0] in self.AD._member_map_.values():
-                if data.command != self.SERVICE.APPROVE:
-                    return await self.delete_messages(chat_id, message_id)
-
+                ad: AdModel
                 ad = await self.storage.Session.get(AdModel, data.args[1:])
                 if ad is None:
                     await self.delete_messages(chat_id, message_id)
-                    return await self.answer_edit_send(
-                        *(query_id, chat_id),
-                        text='Объявление не найдено.',
+                    return await abort('Объявление не найдено.')
+
+                elif data.command != self.SERVICE.APPROVE:
+                    return (
+                        await self.delete_messages(chat_id, message_id),
+                        await self.answer_edit_send(
+                            chat_id=ad.bot_owner_id,
+                            text=f'Ваше объявление #{ad.message_id} отклонено '
+                            'администрацией.',
+                        ),
                     )
 
                 ad.confirm_message_id = None
@@ -105,10 +120,7 @@ class ServiceValidation(object):
                 bot = await self.storage.Session.get(BotModel, data.args[1:])
                 if bot is None:
                     await self.delete_messages(chat_id, message_id)
-                    return await self.answer_edit_send(
-                        *(query_id, chat_id),
-                        text='Бот не найден.',
-                    )
+                    return await abort('Бот не найден.')
 
                 if data.command == self.SERVICE.APPROVE:
                     bot.confirm_message_id = None
@@ -203,8 +215,32 @@ class ServiceValidation(object):
         Returns:
             The message for the settings denial.
         """
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            add: bool = False,
+            show_alert: bool = True,
+        ) -> bool:
+            nonlocal self, query_id, chat_id, input
+            message = await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+            if add and isinstance(message, Message):
+                self.storage.Session.add(
+                    InputMessageModel.from_message(message, input)
+                )
+                await self.storage.Session.commit()
+            return not add
+
         if not isinstance(chat_id, InputModel):
-            raise NotImplementedError('This method works only with inputs.')
+            return await abort(
+                'Описать причину отклонения новых настроек можно только через '
+                'сообщение.'
+            )
         input, chat_id = chat_id, chat_id.chat_id
         if not input.success:
             return

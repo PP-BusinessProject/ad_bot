@@ -61,6 +61,20 @@ class SettingsMessage(object):
         Returns:
             The sent message with :class:`BotModel` properties.
         """
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+
         if isinstance(_message_id := message_id, Message):
             message_id = message_id.id
         input: Optional[InputModel] = None
@@ -72,11 +86,6 @@ class SettingsMessage(object):
                 data = input.data(self.SETTINGS.PAGE)
         if data is None:
             data = Query(self.SETTINGS.PAGE, chat_id, 0)
-
-        async def abort(text: str, /, *, show_alert: bool = False) -> bool:
-            return await self.answer_edit_send(
-                query_id, chat_id, text=text, show_alert=show_alert
-            )
 
         bot: BotModel
         bot = await self.storage.Session.get(BotModel, data.args)
@@ -157,14 +166,6 @@ class SettingsMessage(object):
             elif data.command == self.SETTINGS_DELETE.AVATAR_CONFIRM and (
                 bot.avatar_message_id is not None
             ):
-                try:
-                    await self.delete_avatar_in_service_channel(bot)
-                except BaseException:
-                    await abort(
-                        'Произошла ошибка во время удаления аватара. '
-                        'Попробуйте еще раз.'
-                    )
-                    raise
                 bot.avatar_message_id = None
             await self.storage.Session.commit()
             data = data(self.SETTINGS.PAGE)
@@ -204,8 +205,7 @@ class SettingsMessage(object):
                         'Предыдущий бот не смог применить настройки. Новый '
                         'бот был назначен и настройки были успешно применены.'
                         if phone_number != bot.phone_number
-                        else 'Настройки для бота были успешно применены.',
-                        show_alert=True,
+                        else 'Настройки для бота были успешно применены.'
                     )
                 finally:
                     if phone_number != bot.phone_number:
@@ -214,13 +214,12 @@ class SettingsMessage(object):
             return await abort(
                 'Бот для рассылки не был назначен.'
                 if bot.phone_number is None
-                else 'Бот для рассылки не смог применить настройки.',
-                show_alert=True,
+                else 'Бот для рассылки не смог применить настройки.'
             )
 
         elif data.command == self.SETTINGS.REPLY_VIEW:
             if bot.reply_message_id is None:
-                return await abort('У вас нет автоответа.', show_alert=True)
+                return await abort('У вас нет автоответа.')
             try:
                 reply_message = await self.forward_messages(
                     *(chat_id, bot.owner.service_id, bot.reply_message_id),
@@ -229,12 +228,12 @@ class SettingsMessage(object):
             except RPCError:
                 bot.reply_message_id = None
                 await self.storage.Session.commit()
-                return await abort('Автоответ поврежден.', show_alert=True)
+                return await abort('Автоответ поврежден.')
             else:
                 with suppress(RPCError):
                     if reply_message.reply_markup is None:
                         return await reply_message.edit_reply_markup(
-                            IKM([[IKB('Скрыть', self.SERVICE.HIDE)]])
+                            IKM([[IKB('Скрыть', Query(self.SERVICE.HIDE))]])
                         )
                 return reply_message
 
@@ -494,19 +493,32 @@ class SettingsMessage(object):
         Returns:
             If update was successful, returns True. Otherwise, False.
         """
-        if not isinstance(chat_id, InputModel):
-            raise NotImplementedError('This method works only with inputs.')
-        input, chat_id = chat_id, chat_id.chat_id
 
-        async def abort(text: str, /, *, add: bool = True) -> bool:
-            used = await self.answer_edit_send(query_id, chat_id, text=text)
-            if add and isinstance(used, Message):
+        async def abort(
+            text: str,
+            /,
+            *,
+            add: bool = False,
+            show_alert: bool = True,
+        ) -> bool:
+            nonlocal self, query_id, chat_id, input
+            message = await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+            if add and isinstance(message, Message):
                 self.storage.Session.add(
-                    InputMessageModel.from_message(used, input)
+                    InputMessageModel.from_message(message, input)
                 )
                 await self.storage.Session.commit()
             return not add
 
+        if not isinstance(chat_id, InputModel):
+            return await abort(
+                'Изменить настройки бота можно только через сообщение.'
+            )
+        input, chat_id = chat_id, chat_id.chat_id
         bot: Optional[BotModel] = await self.storage.Session.get(
             BotModel, input.data.args
         )
@@ -553,7 +565,8 @@ class SettingsMessage(object):
                 except PeerIdInvalid:
                     return await abort(
                         'Не обнаружен контакт или пользователь от '
-                        'пересланного сообщения, попробуйте еще раз.'
+                        'пересланного сообщения, попробуйте еще раз.',
+                        add=True,
                     )
 
             old_bot = copy(bot)
@@ -621,7 +634,8 @@ class SettingsMessage(object):
         elif input.data.command == self.SETTINGS.FIRST_NAME:
             if len(message.text) > MAX_NAME_LENGTH:
                 return await abort(
-                    'Введенное имя слишком длинное, попробуйте еще раз.'
+                    'Введенное имя слишком длинное, попробуйте еще раз.',
+                    add=True,
                 )
             changes = '\n'.join(
                 (
@@ -635,7 +649,8 @@ class SettingsMessage(object):
         elif input.data.command == self.SETTINGS.LAST_NAME:
             if len(message.text) > MAX_NAME_LENGTH:
                 return await abort(
-                    'Введенная фамилия слишком длинная, попробуйте еще раз.'
+                    'Введенная фамилия слишком длинная, попробуйте еще раз.',
+                    add=True,
                 )
             changes = '\n'.join(
                 (
@@ -649,7 +664,8 @@ class SettingsMessage(object):
         elif input.data.command == self.SETTINGS.ABOUT:
             if len(message.text) > MAX_ABOUT_LENGTH:
                 return await abort(
-                    'Введеная биография слишком длинная, попробуйте еще раз.'
+                    'Введеная биография слишком длинная, попробуйте еще раз.',
+                    add=True,
                 )
             changes = '\n'.join(
                 (
@@ -664,14 +680,17 @@ class SettingsMessage(object):
             username = '@' + message.text.replace('@', '')
             if len(username) > MAX_USERNAME_LENGTH:
                 return await abort(
-                    'Введеный юзернейм слишком длинный, попробуйте еще раз.'
+                    'Введеный юзернейм слишком длинный, попробуйте еще раз.',
+                    add=True,
                 )
 
             try:
                 await self.get_users(username)
             except UsernameInvalid:
                 return await abort(
-                    'Невозможно использовать этот юзернейм, попробуйте другой.'
+                    'Невозможно использовать этот юзернейм, попробуйте '
+                    'другой.',
+                    add=True,
                 )
             except (UsernameNotOccupied, IndexError):
                 changes = '\n'.join(
@@ -684,12 +703,16 @@ class SettingsMessage(object):
                 )
 
                 bot.username = username.removeprefix('@')
-            except RPCError:
-                return await abort('Произошла ошибка, попробуйте еще раз.')
+            except RPCError as _:
+                return await abort(
+                    'Произошла ошибка, попробуйте еще раз.',
+                    add=True,
+                )
             else:
                 return await abort(
                     'Пользователь с этим юзернеймом уже существует, '
-                    'попробуйте другой.'
+                    'попробуйте другой.',
+                    add=True,
                 )
 
         elif input.data.command == self.SETTINGS.REPLY:
@@ -697,8 +720,11 @@ class SettingsMessage(object):
                 reply_message = await self.forward_messages(
                     bot.owner.service_id, chat_id, message_id
                 )
-            except RPCError:
-                return await abort('Произошла ошибка, попробуйте еще раз.')
+            except RPCError as _:
+                return await abort(
+                    'Произошла ошибка, попробуйте еще раз.',
+                    add=True,
+                )
 
             service_id = get_channel_id(bot.owner.service_id)
             changes = '\n'.join(
@@ -727,7 +753,8 @@ class SettingsMessage(object):
             except (IndexError, RPCError):
                 return await abort(
                     'Не удалось получить информацию о пользователе, '
-                    'попробуйте еще раз.'
+                    'попробуйте еще раз.',
+                    add=True,
                 )
 
             changes = '\n'.join(
@@ -755,7 +782,8 @@ class SettingsMessage(object):
 
             if not photo_messages:
                 return await abort(
-                    'Вы не отправили изображение, попробуйте еще раз.'
+                    'Вы не отправили изображение, попробуйте еще раз.',
+                    add=True,
                 )
 
             invalid_messages: dict[str, Message] = {
@@ -779,7 +807,8 @@ class SettingsMessage(object):
                         if message.media_group_id is not None
                         else word
                     ).capitalize()
-                    + ' слишком маленький размер. Попробуйте еще раз.'
+                    + ' слишком маленький размер. Попробуйте еще раз.',
+                    add=True,
                 )
 
             try:
@@ -792,7 +821,8 @@ class SettingsMessage(object):
                 )
             except RPCError:
                 return await abort(
-                    'Не удалось обновить аватар, попробуйте еще раз.'
+                    'Не удалось обновить аватар, попробуйте еще раз.',
+                    add=True,
                 )
 
             service_id = get_channel_id(bot.owner.service_id)
@@ -812,7 +842,9 @@ class SettingsMessage(object):
             bot.avatar_message_id = new_messages[0].id
 
         else:
-            raise NotImplementedError('Command is not supported.')
+            raise NotImplementedError(
+                f'Command {input.data.command} is not supported.'
+            )
 
         if bot.owner.id != chat_id:
             user_confirmed: bool = await self.storage.Session.scalar(

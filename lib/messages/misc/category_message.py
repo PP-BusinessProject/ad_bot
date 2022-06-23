@@ -60,18 +60,29 @@ class CategoryMessage(object):
             reply markup of the next category message. Otherwise, returns the
             selected category.
         """
+
+        async def abort(
+            text: str,
+            /,
+            *,
+            show_alert: bool = True,
+        ) -> Union[bool, Message]:
+            nonlocal self, query_id, chat_id
+            return await self.answer_edit_send(
+                *(query_id, chat_id),
+                text=text,
+                show_alert=show_alert,
+            )
+
+        def _query(id: int = 0, /) -> Query:
+            return data.__copy__(kwargs=data.kwargs | {kwarg: id})
+
         if isinstance(chat_id, InputModel):
             input, chat_id = chat_id, chat_id.chat_id
             if input.message_id is not None:
                 message_id = input.message_id
         if isinstance(message_id, Message):
             message_id = message_id.id
-
-        def _query(id: int = 0, /) -> Query:
-            return data.__copy__(kwargs=data.kwargs | {kwarg: id})
-
-        async def abort(text: str, /) -> Optional[Message]:
-            return await self.answer_edit_send(query_id, chat_id, text=text)
 
         category: Optional[CategoryModel] = None
         category_id: int = 0
