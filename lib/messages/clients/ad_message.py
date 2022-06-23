@@ -290,12 +290,12 @@ class AdMessage(object):
             )
             await self.storage.Session.commit()
 
-        sent_ads_length: int = await self.storage.Session.scalar(
+        sent_ads_count: int = await self.storage.Session.scalar(
             select(count()).where(with_parent(ad, AdModel.sent_ads))
         )
 
         if data.command == self.AD.JOURNAL:
-            if not sent_ads_length:
+            if not sent_ads_count:
                 return await abort(
                     'У этого объявления нет пересланных сообщений.'
                 )
@@ -309,7 +309,7 @@ class AdMessage(object):
                     SettingsModel.id.is_(True)
                 )
             )
-            total_journal_pages = -(-sent_ads_length // page_list_size)
+            total_journal_pages = -(-sent_ads_count // page_list_size)
             return await self.send_or_edit(
                 *(chat_id, message_id),
                 text='\n'.join(
@@ -318,13 +318,13 @@ class AdMessage(object):
                         message_header(self, SentAdModel(ad=ad), chat_id),
                         '',
                         '**Всего сообщений в журнале:** %s шт'
-                        % sent_ads_length,
+                        % sent_ads_count,
                     )
                     if _ is not None
                 ),
                 reply_markup=self.hpages(
                     journal_page_index,
-                    ads_count,
+                    total_journal_pages,
                     Query(
                         *(self.AD.JOURNAL, bot.owner.id, bot.id),
                         **(data.kwargs if data is not None else {})
@@ -395,7 +395,7 @@ class AdMessage(object):
                         else '__Отсутствует__'
                     ),
                     '**Количество пересланных сообщений:** %s шт'
-                    % sent_ads_length,
+                    % sent_ads_count,
                 )
                 if _ is not None
             ),
