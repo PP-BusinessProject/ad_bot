@@ -9,7 +9,7 @@ from pyrogram.types import InlineKeyboardMarkup as IKM
 from pyrogram.types import Message
 from sqlalchemy.orm import noload
 from sqlalchemy.orm.util import with_parent
-from sqlalchemy.sql.expression import exists, select, text
+from sqlalchemy.sql.expression import delete, exists, select, text
 from sqlalchemy.sql.functions import count
 
 from ...models.bots.sent_ad_model import SentAdModel
@@ -263,6 +263,26 @@ class AdMessage(object):
                 data=query,
                 query_id=query_id,
             )
+        elif data.command == self.AD.JOURNAL_CLEAR:
+            return await self.send_or_edit(
+                *(chat_id, message_id),
+                text='Вы уверены что хотите очистить журнал рассылки этого '
+                'объявления?',
+                reply_markup=IKM(
+                    [
+                        [
+                            IKB('Да', _query(self.AD.JOURNAL_CLEAR_CONFIRM)),
+                            IKB('Нет', _query(self.AD.PAGE)),
+                        ]
+                    ]
+                ),
+            )
+
+        elif data.command == self.AD.JOURNAL_CLEAR_CONFIRM:
+            await self.storage.Session.execute(
+                delete(SentAdModel, with_parent(ad, AdModel.sent_ads))
+            )
+            await self.storage.Session.commit()
 
         sent_ads_length: int = await self.storage.Session.scalar(
             select(count()).where(with_parent(ad, AdModel.sent_ads))
@@ -309,8 +329,7 @@ class AdMessage(object):
                 + [
                     [
                         IKB(
-                            '[%s]'
-                            % sent_ad.timestamp.astimezone().strftime(
+                            sent_ad.timestamp.astimezone().strftime(
                                 r'%Y-%m-%d %H:%M:%S'
                             )
                             if sent_ad.timestamp is not None
@@ -412,9 +431,13 @@ class AdMessage(object):
                 + [
                     [
                         IKB(
+                            'Очистить журнал рассылки',
+                            _query(self.AD.JOURNAL_CLEAR),
+                        ),
+                        IKB(
                             'Просмотреть журнал рассылки',
                             _query(self.AD.JOURNAL),
-                        )
+                        ),
                     ]
                 ]
                 + (
@@ -450,7 +473,7 @@ class AdMessage(object):
                                 *(self.BOT.PAGE, bot.owner.id, bot.id),
                                 **(data.kwargs if data is not None else {}),
                             ),
-                        )
+                        ),
                     ],
                 ],
             ),

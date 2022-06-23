@@ -114,6 +114,10 @@ class Commands(object):
         CATEGORY_DELETE: Final[str] = SEPARATOR.join((_SELF, 'CD'))
         CATEGORY_PICK: Final[str] = SEPARATOR.join((_SELF, 'CP'))
         JOURNAL: Final[str] = SEPARATOR.join((_SELF, 'J'))
+        JOURNAL_CLEAR: Final[str] = SEPARATOR.join((JOURNAL, 'C'))
+        JOURNAL_CLEAR_CONFIRM: Final[str] = SEPARATOR.join(
+            (JOURNAL_CLEAR, 'C')
+        )
         ACTIVE: Final[str] = SEPARATOR.join((_SELF, 'AC'))
         BAN: Final[str] = SEPARATOR.join((_SELF, 'B'))
         DELETE: Final[str] = SEPARATOR.join((_SELF, 'D'))
