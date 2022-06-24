@@ -266,7 +266,7 @@ class SenderJob(object):
                         chat_id=sent_msg.chat.id,
                         message_id=sent_msg.id,
                         link=sent_msg.link,
-                        timestamp=sent_msg.date.replace(tzinfo=tzlocal()),
+                        timestamp=sent_msg.date,
                     )
                     with suppress(IntegrityError):
                         self.storage.Session.add(sent_ad)

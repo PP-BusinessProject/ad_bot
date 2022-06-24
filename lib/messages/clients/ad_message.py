@@ -1,9 +1,10 @@
 """The module for processing AdCommands."""
 
 from contextlib import suppress
-from datetime import date
+from datetime import datetime
 from typing import TYPE_CHECKING, Optional, Union
 
+from dateutil.tz.tz import tzlocal
 from pyrogram.errors import RPCError
 from pyrogram.types import InlineKeyboardButton as IKB
 from pyrogram.types import InlineKeyboardMarkup as IKM
@@ -329,10 +330,14 @@ class AdMessage(object):
                             ' '.join(
                                 _
                                 for _ in (
-                                    sent_ad.timestamp.astimezone().strftime(
+                                    sent_ad.timestamp.astimezone(
+                                        tzlocal()
+                                    ).strftime(
                                         r'%H:%M:%S'
-                                        if date.today()
-                                        == sent_ad.timestamp.date()
+                                        if datetime.now(tzlocal()).date()
+                                        == sent_ad.timestamp.astimezone(
+                                            tzlocal()
+                                        ).date()
                                         else r'%Y-%m-%d %H:%M:%S'
                                     )
                                     if sent_ad.timestamp is not None
