@@ -62,23 +62,23 @@ class ReplyToUser(object):
         if not isinstance(message, Message):
             message = await self.get_messages(chat_id, message_id)
 
-        if chat_id == owner_bot.owner_id:
+        if chat_id == owner_bot.forward_to_id:
             if message.reply_to_message is None or (
                 message.reply_to_message.forward_from is None
             ):
                 return await abort(
                     'Пользователь для пересылки сообщения не распознан.',
                 )
+            forward_id = message.reply_to_message.forward_from.id
             try:
                 await self.forward_messages(
-                    message.reply_to_message.forward_from.id,
-                    *(chat_id, message_id),
+                    *(forward_id, chat_id, message_id),
                     drop_author=True,
                 )
             except RPCError as _:
                 return await abort(
                     'Произошла ошибка при пересылке сообщения '
-                    'пользователю.',
+                    f'[пользователю](tg://user?id={forward_id})).',
                 )
 
         else:
@@ -88,25 +88,28 @@ class ReplyToUser(object):
                 )
             replied: bool = False
             try:
-                if await self.storage.Session.scalar(
-                    select(
-                        or_(
-                            SettingsModel.replies_per_chat == 0,
-                            select(count())
-                            .filter(
-                                ReplyModel.client_phone_number
-                                == owner_bot.phone_number,
-                                ReplyModel.chat_id == chat_id,
-                                ReplyModel.replied,
+                if owner_bot.reply_message_id is not None and (
+                    await self.storage.Session.scalar(
+                        select(
+                            or_(
+                                SettingsModel.replies_per_chat == 0,
+                                select(count())
+                                .filter(
+                                    ReplyModel.client_phone_number
+                                    == owner_bot.phone_number,
+                                    ReplyModel.chat_id == chat_id,
+                                    ReplyModel.replied,
+                                )
+                                .scalar_subquery()
+                                < SettingsModel.replies_per_chat,
                             )
-                            .scalar_subquery()
-                            < SettingsModel.replies_per_chat,
+                        ).where(SettingsModel.id.is_(True))
+                    )
+                    and await self.check_chats(
+                        (
+                            owner_bot.owner.service_id,
+                            owner_bot.owner.service_invite,
                         )
-                    ).where(SettingsModel.id.is_(True))
-                ) and await self.check_chats(
-                    (
-                        owner_bot.owner.service_id,
-                        owner_bot.owner.service_invite,
                     )
                 ):
                     await self.forward_messages(

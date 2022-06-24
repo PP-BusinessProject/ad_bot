@@ -322,17 +322,7 @@ class AdMessage(object):
                     )
                     if _ is not None
                 ),
-                reply_markup=self.hpages(
-                    journal_page_index,
-                    total_journal_pages,
-                    Query(
-                        *(self.AD.JOURNAL, bot.owner.id, bot.id),
-                        **(data.kwargs if data is not None else {})
-                        | dict(a_p=page_index),
-                    ),
-                    kwarg='aj_p',
-                )
-                + [
+                reply_markup=[
                     [
                         IKB(
                             sent_ad.timestamp.astimezone().strftime(
@@ -349,9 +339,15 @@ class AdMessage(object):
                             .where(with_parent(ad, AdModel.sent_ads))
                             .order_by(SentAdModel.timestamp)
                             .slice(
-                                min(page_index, total_journal_pages - 1)
+                                min(
+                                    journal_page_index,
+                                    total_journal_pages - 1,
+                                )
                                 * page_list_size,
-                                min(page_index + 1, total_journal_pages)
+                                min(
+                                    journal_page_index + 1,
+                                    total_journal_pages,
+                                )
                                 * page_list_size,
                             )
                             .options(
@@ -361,6 +357,16 @@ class AdMessage(object):
                         )
                     )
                 ]
+                + self.hpages(
+                    journal_page_index,
+                    total_journal_pages,
+                    Query(
+                        *(self.AD.JOURNAL, bot.owner.id, bot.id),
+                        **(data.kwargs if data is not None else {})
+                        | dict(a_p=page_index),
+                    ),
+                    kwarg='aj_p',
+                )
                 + [[IKB('Назад', _query(self.AD.PAGE))]],
             )
 
