@@ -1,13 +1,14 @@
 """The module for processing AdCommands."""
 
 from contextlib import suppress
+from datetime import date
 from typing import TYPE_CHECKING, Optional, Union
 
 from pyrogram.errors import RPCError
 from pyrogram.types import InlineKeyboardButton as IKB
 from pyrogram.types import InlineKeyboardMarkup as IKM
 from pyrogram.types import Message
-from sqlalchemy.orm import noload
+from sqlalchemy.orm import joinedload, noload
 from sqlalchemy.orm.util import with_parent
 from sqlalchemy.sql.expression import delete, exists, select, text
 from sqlalchemy.sql.functions import count
@@ -325,11 +326,23 @@ class AdMessage(object):
                 reply_markup=[
                     [
                         IKB(
-                            sent_ad.timestamp.astimezone().strftime(
-                                r'%Y-%m-%d %H:%M:%S'
-                            )
-                            if sent_ad.timestamp is not None
-                            else str(sent_ad.chat_id),
+                            ' '.join(
+                                _
+                                for _ in (
+                                    sent_ad.timestamp.astimezone().strftime(
+                                        r'%H:%M:%S'
+                                        if date.today()
+                                        == sent_ad.timestamp.date()
+                                        else r'%Y-%m-%d %H:%M:%S'
+                                    )
+                                    if sent_ad.timestamp is not None
+                                    else str(sent_ad.chat_id),
+                                    sent_ad.chat.title
+                                    if sent_ad.chat
+                                    else None,
+                                )
+                                if _
+                            ),
                             url=sent_ad.link,
                         )
                     ]
@@ -337,7 +350,7 @@ class AdMessage(object):
                         await self.storage.Session.stream_scalars(
                             select(SentAdModel)
                             .where(with_parent(ad, AdModel.sent_ads))
-                            .order_by(SentAdModel.timestamp)
+                            .order_by(SentAdModel.timestamp.desc())
                             .slice(
                                 min(
                                     journal_page_index,
@@ -352,7 +365,7 @@ class AdMessage(object):
                             )
                             .options(
                                 noload(SentAdModel.ad),
-                                noload(SentAdModel.chat),
+                                joinedload(SentAdModel.chat),
                             )
                         )
                     )
