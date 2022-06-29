@@ -7,20 +7,11 @@ from typing import TYPE_CHECKING, Optional
 from apscheduler.job import Job
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.util import undefined
-from pyrogram.errors import (
-    ChannelBanned,
-    ChannelPrivate,
-    ChatAdminRequired,
-    ChatWriteForbidden,
-    FloodWait,
-    PeerIdInvalid,
-    SlowmodeWait,
-    Unauthorized,
-)
-from pyrogram.errors.exceptions.bad_request_400 import (
-    MessageIdInvalid,
-    MsgIdInvalid,
-)
+from pyrogram.errors import (ChannelBanned, ChannelPrivate, ChatAdminRequired,
+                             ChatWriteForbidden, FloodWait, PeerIdInvalid,
+                             SlowmodeWait, Unauthorized)
+from pyrogram.errors.exceptions.bad_request_400 import (MessageIdInvalid,
+                                                        MsgIdInvalid)
 from pyrogram.errors.rpc_error import RPCError
 from pyrogram.types.user_and_chats.chat import Chat
 from sqlalchemy.exc import IntegrityError, MissingGreenlet
@@ -219,7 +210,7 @@ class SenderJob(object):
                         .order_by(SentAdModel.timestamp.desc())
                         .limit(1)
                         .scalar_subquery(),
-                        nullsfirst(sql_max(SentAdModel.timestamp)),
+                        nullsfirst(sql_max(sent_ads_subquery.c.timestamp)),
                     )
                 ):
                     try:
