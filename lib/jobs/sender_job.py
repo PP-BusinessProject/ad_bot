@@ -176,7 +176,7 @@ class SenderJob(object):
                     SentAdModel.ad_chat_id,
                     SentAdModel.ad_message_id,
                     SentAdModel.chat_id,
-                    sql_max(SentAdModel.timestamp).label('"Timestamp"'),
+                    sql_max(SentAdModel.timestamp).label('Timestamp'),
                 )
                 .group_by(
                     SentAdModel.ad_chat_id,
@@ -190,7 +190,7 @@ class SenderJob(object):
                 select(AdModel, sent_ads_subquery.c.chat_id)
                 .join(sent_ads_subquery, isouter=True)
                 .where(with_parent(bot, BotModel.ads) & AdModel.valid)
-                .order_by(nullsfirst(sent_ads_subquery.c['"Timestamp"']))
+                .order_by(nullsfirst(sent_ads_subquery.c['Timestamp']))
                 .options(noload(AdModel.owner_bot))
             ):
                 if ad.category_id in checked_empty_categories:
@@ -200,7 +200,7 @@ class SenderJob(object):
                 sent_ad_chats_subquery = aliased(
                     select(
                         SentAdModel.chat_id,
-                        sql_max(SentAdModel.timestamp).label('"Timestamp"'),
+                        sql_max(SentAdModel.timestamp).label('Timestamp'),
                     )
                     .where(with_parent(ad, AdModel.sent_ads))
                     .group_by(SentAdModel.chat_id)
@@ -215,15 +215,15 @@ class SenderJob(object):
                         ad.category_id is None
                         or ChatModel.category_id == ad.category_id,
                         or_(
-                            sent_ad_chats_subquery.c['"Timestamp"'].is_(None),
-                            now() - sent_ad_chats_subquery.c['"Timestamp"']
+                            sent_ad_chats_subquery.c['Timestamp'].is_(None),
+                            now() - sent_ad_chats_subquery.c['Timestamp']
                             > ChatModel.period,
                         ),
                     )
                     .order_by(
                         last_ad_chat_id is None
                         or ChatModel.id <= last_ad_chat_id,
-                        nullsfirst(sent_ad_chats_subquery.c['"Timestamp"']),
+                        nullsfirst(sent_ad_chats_subquery.c['Timestamp']),
                     )
                 ):
                     try:
