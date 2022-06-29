@@ -7,16 +7,25 @@ from typing import TYPE_CHECKING, Optional
 from apscheduler.job import Job
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.util import undefined
-from pyrogram.errors import (ChannelBanned, ChannelPrivate, ChatAdminRequired,
-                             ChatWriteForbidden, FloodWait, PeerIdInvalid,
-                             SlowmodeWait, Unauthorized)
-from pyrogram.errors.exceptions.bad_request_400 import (MessageIdInvalid,
-                                                        MsgIdInvalid)
+from pyrogram.errors import (
+    ChannelBanned,
+    ChannelPrivate,
+    ChatAdminRequired,
+    ChatWriteForbidden,
+    FloodWait,
+    PeerIdInvalid,
+    SlowmodeWait,
+    Unauthorized,
+)
+from pyrogram.errors.exceptions.bad_request_400 import (
+    MessageIdInvalid,
+    MsgIdInvalid,
+)
 from pyrogram.errors.rpc_error import RPCError
 from pyrogram.types.user_and_chats.chat import Chat
 from sqlalchemy.exc import IntegrityError, MissingGreenlet
 from sqlalchemy.future import select
-from sqlalchemy.orm import contains_eager, selectinload, with_parent
+from sqlalchemy.orm import contains_eager, noload, with_parent
 from sqlalchemy.orm.util import aliased
 from sqlalchemy.sql.expression import exists, nullsfirst, or_, text, update
 from sqlalchemy.sql.functions import max as sql_max
@@ -160,57 +169,56 @@ class SenderJob(object):
                 await self.storage.Session.commit()
 
             ad: AdModel
+            last_ad_chat_id: Optional[int]
             checked_empty_categories: set[int] = set()
-            async for ad in await self.storage.Session.stream_scalars(
-                select(AdModel)
+            sent_ads_subquery = aliased(
+                select(
+                    SentAdModel.chat_id,
+                    SentAdModel.ad_chat_id,
+                    SentAdModel.ad_message_id,
+                    sql_max(SentAdModel.timestamp).label('"Timestamp"'),
+                )
+                .group_by(SentAdModel.ad_chat_id, SentAdModel.ad_message_id)
+                .order_by(sql_max(SentAdModel.timestamp))
+                .subquery()
+            )
+            async for ad, last_ad_chat_id in await self.storage.Session.stream(
+                select(AdModel, sent_ads_subquery.c.chat_id)
+                .join(sent_ads_subquery, isouter=True)
                 .where(with_parent(bot, BotModel.ads) & AdModel.valid)
-                .order_by(
-                    AdModel.message_id
-                    <= select(SentAdModel.ad_message_id)
-                    .join(SentAdModel.ad)
-                    .where(with_parent(bot, BotModel.ads) & AdModel.valid)
-                    .order_by(SentAdModel.timestamp.desc())
-                    .limit(1)
-                    .scalar_subquery()
-                )
-                .options(
-                    selectinload(AdModel.owner_bot).selectinload(
-                        BotModel.owner
-                    )
-                )
+                .order_by(nullsfirst(sent_ads_subquery.c['"Timestamp"']))
+                .options(noload(AdModel.owner_bot))
             ):
                 if ad.category_id in checked_empty_categories:
                     continue
 
-                sent_ads_subquery = aliased(
-                    select(SentAdModel)
+                _chat: Optional[Chat] = None
+                sent_ad_chats_subquery = aliased(
+                    select(
+                        SentAdModel.chat_id,
+                        sql_max(SentAdModel.timestamp).label('"Timestamp"'),
+                    )
                     .where(with_parent(ad, AdModel.sent_ads))
-                    .order_by(SentAdModel.timestamp.desc())
+                    .group_by(SentAdModel.chat_id)
+                    .order_by(sql_max(SentAdModel.timestamp))
                     .subquery()
                 )
-                _chat: Optional[Chat] = None
                 async for chat in await self.storage.Session.stream_scalars(
                     select(ChatModel)
-                    .join(sent_ads_subquery, isouter=True)
+                    .join(sent_ad_chats_subquery, isouter=True)
                     .filter(
                         ChatModel.active,
                         ad.category_id is None
                         or ChatModel.category_id == ad.category_id,
                         or_(
-                            sent_ads_subquery.c.timestamp.is_(None),
-                            now() - sent_ads_subquery.c.timestamp
+                            sent_ad_chats_subquery.c['"Timestamp"'].is_(None),
+                            now() - sent_ad_chats_subquery.c['"Timestamp"']
                             > ChatModel.period,
                         ),
                     )
-                    .group_by(ChatModel.id, sent_ads_subquery.c.chat_id)
                     .order_by(
-                        ChatModel.id
-                        <= select(SentAdModel.chat_id)
-                        .where(with_parent(ad, AdModel.sent_ads))
-                        .order_by(SentAdModel.timestamp.desc())
-                        .limit(1)
-                        .scalar_subquery(),
-                        nullsfirst(sql_max(sent_ads_subquery.c.timestamp)),
+                        ChatModel.id <= last_ad_chat_id,
+                        nullsfirst(sent_ad_chats_subquery.c['"Timestamp"']),
                     )
                 ):
                     try:
