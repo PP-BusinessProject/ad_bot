@@ -218,7 +218,6 @@ class SenderJob(object):
                         .scalar_subquery(),
                         nullsfirst(sql_max(SentAdModel.timestamp)),
                     )
-                    .limit(1)
                 ):
                     try:
                         if _chat := await worker.check_chats(
