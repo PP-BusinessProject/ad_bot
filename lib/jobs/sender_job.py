@@ -173,12 +173,16 @@ class SenderJob(object):
             checked_empty_categories: set[int] = set()
             sent_ads_subquery = aliased(
                 select(
-                    SentAdModel.chat_id,
                     SentAdModel.ad_chat_id,
                     SentAdModel.ad_message_id,
+                    SentAdModel.chat_id,
                     sql_max(SentAdModel.timestamp).label('"Timestamp"'),
                 )
-                .group_by(SentAdModel.ad_chat_id, SentAdModel.ad_message_id)
+                .group_by(
+                    SentAdModel.ad_chat_id,
+                    SentAdModel.ad_message_id,
+                    SentAdModel.chat_id,
+                )
                 .order_by(sql_max(SentAdModel.timestamp))
                 .subquery()
             )
