@@ -26,6 +26,7 @@ from pyrogram.types.user_and_chats.chat import Chat
 from sqlalchemy.exc import IntegrityError, MissingGreenlet
 from sqlalchemy.future import select
 from sqlalchemy.orm import contains_eager, selectinload, with_parent
+from sqlalchemy.orm.util import aliased
 from sqlalchemy.sql.expression import exists, nullsfirst, or_, text, update
 from sqlalchemy.sql.functions import max as sql_max
 from sqlalchemy.sql.functions import now
@@ -190,25 +191,27 @@ class SenderJob(object):
                 if ad.category_id in checked_empty_categories:
                     continue
 
+                sent_ads_subquery = aliased(
+                    select(SentAdModel)
+                    .where(with_parent(ad, AdModel.sent_ads))
+                    .order_by(SentAdModel.timestamp.desc())
+                    .subquery()
+                )
                 _chat: Optional[Chat] = None
                 async for chat in await self.storage.Session.stream_scalars(
                     select(ChatModel)
-                    .join(SentAdModel, isouter=True)
+                    .join(sent_ads_subquery, isouter=True)
                     .filter(
                         ChatModel.active,
                         ad.category_id is None
                         or ChatModel.category_id == ad.category_id,
                         or_(
-                            SentAdModel.ad_chat_id.is_(None),
-                            SentAdModel.ad_message_id.is_(None),
-                            with_parent(ad, AdModel.sent_ads),
-                        ),
-                        or_(
-                            SentAdModel.timestamp.is_(None),
-                            now() - SentAdModel.timestamp > ChatModel.period,
+                            sent_ads_subquery.c.timestamp.is_(None),
+                            now() - sent_ads_subquery.c.timestamp
+                            > ChatModel.period,
                         ),
                     )
-                    .group_by(ChatModel.id, SentAdModel.chat_id)
+                    .group_by(ChatModel.id, sent_ads_subquery.c.chat_id)
                     .order_by(
                         ChatModel.id
                         <= select(SentAdModel.chat_id)
