@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Optional
 from apscheduler.job import Job
 from apscheduler.triggers.interval import IntervalTrigger
 from apscheduler.util import undefined
-from dateutil.tz.tz import tzlocal
 from pyrogram.errors import (
     ChannelBanned,
     ChannelPrivate,
@@ -27,7 +26,8 @@ from pyrogram.types.user_and_chats.chat import Chat
 from sqlalchemy.exc import IntegrityError, MissingGreenlet
 from sqlalchemy.future import select
 from sqlalchemy.orm import contains_eager, selectinload, with_parent
-from sqlalchemy.sql.expression import exists, or_, text, update
+from sqlalchemy.sql.expression import exists, nullsfirst, or_, text, update
+from sqlalchemy.sql.functions import max as sql_max
 from sqlalchemy.sql.functions import now
 
 from ..models.bots.chat_model import ChatDeactivatedCause, ChatModel
@@ -195,7 +195,7 @@ class SenderJob(object):
                     select(ChatModel)
                     .join(SentAdModel, isouter=True)
                     .filter(
-                        ChatModel.valid,
+                        ChatModel.active,
                         ad.category_id is None
                         or ChatModel.category_id == ad.category_id,
                         or_(
@@ -208,6 +208,7 @@ class SenderJob(object):
                             now() - SentAdModel.timestamp > ChatModel.period,
                         ),
                     )
+                    .group_by(ChatModel.id, SentAdModel.chat_id)
                     .order_by(
                         ChatModel.id
                         <= select(SentAdModel.chat_id)
@@ -215,8 +216,9 @@ class SenderJob(object):
                         .order_by(SentAdModel.timestamp.desc())
                         .limit(1)
                         .scalar_subquery(),
-                        SentAdModel.timestamp,
+                        nullsfirst(sql_max(SentAdModel.timestamp)),
                     )
+                    .limit(1)
                 ):
                     try:
                         if _chat := await worker.check_chats(
