@@ -209,7 +209,15 @@ class SenderJob(object):
                         ),
                     )
                     .group_by(ChatModel.id, SentAdModel.chat_id)
-                    .order_by(nullsfirst(sql_max(SentAdModel.timestamp)))
+                    .order_by(
+                        ChatModel.id
+                        <= select(SentAdModel.chat_id)
+                        .where(with_parent(ad, AdModel.sent_ads))
+                        .order_by(SentAdModel.timestamp.desc())
+                        .limit(1)
+                        .scalar_subquery(),
+                        nullsfirst(sql_max(SentAdModel.timestamp)),
+                    )
                     .limit(1)
                 ):
                     try:
