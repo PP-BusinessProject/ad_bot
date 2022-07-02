@@ -5,6 +5,7 @@ from contextlib import suppress
 from typing import TYPE_CHECKING, Optional, Union
 
 from dateutil.tz.tz import tzlocal
+from pyrogram.enums.chat_type import ChatType
 from pyrogram.errors.rpc_error import RPCError
 from pyrogram.types.messages_and_media.message import Message
 from sqlalchemy.sql.expression import or_, select
@@ -46,7 +47,7 @@ class ReplyToUser(object):
 
         if isinstance(chat_id, InputModel):
             chat_id = chat_id.chat_id
-        if chat_id == 42777 or not self.storage.phone_number:
+        if chat_id == 42777 or not self.storage.is_nested:
             return
 
         owner_bot: Optional[BotModel] = await self.storage.Session.scalar(
@@ -63,13 +64,32 @@ class ReplyToUser(object):
             message = await self.get_messages(chat_id, message_id)
 
         if chat_id == owner_bot.forward_to_id:
-            if message.reply_to_message is None or (
-                message.reply_to_message.forward_from is None
-            ):
+            if message.reply_to_message is None:
                 return await abort(
-                    'Пользователь для пересылки сообщения не распознан.',
+                    'Пользователь для пересылки сообщения не распознан.'
                 )
-            forward_id = message.reply_to_message.forward_from.id
+            elif message.reply_to_message.forward_from is None:
+                async for dialog in self.iter_dialogs(
+                    exclude_pinned=True, folder_id=0
+                ):
+                    if dialog.chat.type == ChatType.PRIVATE and (
+                        ' '.join(
+                            _
+                            for _ in (
+                                dialog.chat.first_name,
+                                dialog.chat.last_name,
+                            )
+                            if _
+                        )
+                        == message.reply_to_message.forward_sender_name
+                    ):
+                        forward_id = dialog.chat.id
+                        break
+                else:
+                    return await abort('У пользователя скрыт аккаунт.')
+            else:
+                forward_id = message.reply_to_message.forward_from.id
+
             try:
                 await self.forward_messages(
                     *(forward_id, chat_id, message_id),
@@ -109,7 +129,8 @@ class ReplyToUser(object):
                         (
                             owner_bot.owner.service_id,
                             owner_bot.owner.service_invite,
-                        )
+                        ),
+                        folder_id=1,
                     )
                 ):
                     await self.forward_messages(

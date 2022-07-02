@@ -1,5 +1,6 @@
 """The module with the :meth:`AdBotClient.check_chats`."""
 
+from contextlib import suppress
 from time import monotonic
 from typing import (
     TYPE_CHECKING,
@@ -40,6 +41,7 @@ class CheckChatsFloodWait(FloodWait):
         self: Self,
         checked_chats: dict[CheckChat, Chat],
         /,
+        folder_id: Optional[int] = None,
         x: Union[int, str, RpcError] = None,
     ):
         super().__init__(x)
@@ -52,6 +54,7 @@ class CheckChats(object):
         self: Self,
         chats: CheckChat,
         /,
+        folder_id: Optional[int] = None,
     ) -> Optional[Chat]:
         pass
 
@@ -60,6 +63,7 @@ class CheckChats(object):
         self: Self,
         chats: Iterable[CheckChat],
         /,
+        folder_id: Optional[int] = None,
     ) -> list[Optional[Chat]]:
         pass
 
@@ -67,6 +71,7 @@ class CheckChats(object):
         self: 'AdBotClient',
         chats: Union[CheckChat, Iterable[CheckChat]],
         /,
+        folder_id: Optional[int] = None,
     ) -> Union[Optional[Chat], list[Optional[Chat]]]:
         """
         Check if each of the chats is accesible by this client.
@@ -77,6 +82,9 @@ class CheckChats(object):
                 the client.
                     Can optionally be a tuples of the chat link and chat
                     invite links to try and join if the chat is not accessible.
+
+            folder_id (``Optional[int]``, *optional*):
+                The id of a peer folder to put joined chats to.
 
         Returns:
             The lif of the one or many chats that should be accessible by
@@ -94,7 +102,7 @@ class CheckChats(object):
         if not (is_iterable := is_iter(chats) and any(map(is_iter, chats))):
             chats = (chats,)
 
-        agen = self.iter_check_chats(chats, yield_on_flood=False)
+        agen = self.iter_check_chats(chats, folder_id, yield_on_flood=False)
         if not is_iterable:
             return await anext(aiter(agen), None)
         return [_ async for _ in agen]
@@ -103,6 +111,7 @@ class CheckChats(object):
         self: 'AdBotClient',
         chats: Union[CheckChat, Iterable[CheckChat]],
         /,
+        folder_id: Optional[int] = None,
         *,
         yield_on_flood: Optional[bool] = None,
     ) -> AsyncGenerator[Optional[Chat], None]:
@@ -115,6 +124,9 @@ class CheckChats(object):
                 the client.
                     Can optionally be a tuples of the chat link and chat
                     invite links to try and join if the chat is not accessible.
+
+            folder_id (``Optional[int]``, *optional*):
+                The id of a peer folder to put joined chats to.
 
             yield_on_flood (``Optional[bool]``, *optional*):
                 If the `FloodWait` exception should be yielded.
@@ -160,13 +172,21 @@ class CheckChats(object):
                 try:
                     if self.is_bot:
                         raise UserAlreadyParticipant
-                    return await self.join_chat(invite_link)
+                    chat = await self.join_chat(invite_link)
                 except UserAlreadyParticipant:
-                    return await self.get_chat(invite_link)
+                    chat = await self.get_chat(invite_link)
                 except FloodWait:
                     raise
                 except RPCError as _:
                     return None
+
+                with suppress(RPCError):
+                    if folder_id == 1:
+                        await self.archive_chats(chat.id)
+                    elif folder_id == 0:
+                        await self.unarchive_chats(chat.id)
+
+                return chat
 
             if not is_iter(chat):
                 return None

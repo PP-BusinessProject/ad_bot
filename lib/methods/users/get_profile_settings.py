@@ -85,7 +85,8 @@ class GetProfileSettings(object):
                 (
                     bot.owner.service_id,
                     bot.owner.service_invite,
-                )
+                ),
+                folder_id=1,
             ):
                 avatar_message = await self.send_cached_media(
                     bot.owner.service_id,
@@ -98,7 +99,8 @@ class GetProfileSettings(object):
                 (
                     bot.owner.service_id,
                     bot.owner.service_invite,
-                )
+                ),
+                folder_id=1,
             ):
                 avatar_messages = await self.send_media_group(
                     bot.owner.service_id, avatars

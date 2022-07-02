@@ -273,7 +273,8 @@ class ChatMessage(object):
                                 chat.id,
                                 chat.invite_link,
                                 f'@{chat.username}' if chat.username else None,
-                            )
+                            ),
+                            folder_id=1,
                         )
                         if _chat is None:
                             return await abort(
@@ -749,6 +750,7 @@ class ChatMessage(object):
             async with auto_init(self.get_worker(phone_number)) as worker:
                 async for chat in worker.iter_check_chats(
                     check_chats[chat_index + 1 :],
+                    folder_id=1,
                     yield_on_flood=True,
                 ):
                     if isinstance(e := chat, CheckChatsFloodWait):

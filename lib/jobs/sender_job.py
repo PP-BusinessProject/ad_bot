@@ -142,7 +142,8 @@ class SenderJob(object):
                             (
                                 bot.owner.service_id,
                                 bot.owner.service_invite,
-                            )
+                            ),
+                            folder_id=1,
                         ):
                             continue
                         elif phone_number == bot.phone_number:
@@ -232,7 +233,8 @@ class SenderJob(object):
                                 chat.id,
                                 chat.invite_link,
                                 f'@{chat.username}' if chat.username else None,
-                            )
+                            ),
+                            folder_id=1,
                         ):
                             break
                     except ValueError:

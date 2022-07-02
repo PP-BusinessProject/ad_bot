@@ -3,7 +3,6 @@ from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
-from traceback import print_exc
 from typing import Any, Callable, ClassVar, Dict, Final, List, Optional, Type
 
 from apscheduler.schedulers import (

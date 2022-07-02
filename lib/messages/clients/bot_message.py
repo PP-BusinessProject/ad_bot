@@ -4,10 +4,12 @@ from contextlib import suppress
 from typing import TYPE_CHECKING, Optional, Union
 
 from pyrogram.errors.rpc_error import RPCError
-from pyrogram.raw.types.channel_participant_admin import \
-    ChannelParticipantAdmin
-from pyrogram.raw.types.channel_participant_creator import \
-    ChannelParticipantCreator
+from pyrogram.raw.types.channel_participant_admin import (
+    ChannelParticipantAdmin,
+)
+from pyrogram.raw.types.channel_participant_creator import (
+    ChannelParticipantCreator,
+)
 from pyrogram.types import InlineKeyboardButton as IKB
 from pyrogram.types import InlineKeyboardMarkup as IKM
 from pyrogram.types import Message
@@ -407,7 +409,8 @@ class BotMessage(object):
                             (
                                 bot.owner.service_id,
                                 bot.owner.service_invite,
-                            )
+                            ),
+                            folder_id=1,
                         ) and isinstance(
                             await self.get_channel_participants(
                                 bot.owner.service_id,
@@ -429,14 +432,12 @@ class BotMessage(object):
                                 'Вам успешно выдано права администратора для '
                                 'сервисного чата [пользователя]'
                                 f'(tg://user?id={bot.owner.id}).'
-
                             )
                             break
             else:
                 return await abort(
                     'На данный момент нет свободного бота для добавления вас '
                     'в сервисный чат пользователя. Попробуйте еще раз позже.'
-
                 )
 
         elif data.command == self.BOT.BAN:

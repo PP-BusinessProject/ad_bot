@@ -72,7 +72,8 @@ class InitializeUserService(object):
 
         freshly_created: bool = False
         if user.service_id is None or not await self.check_chats(
-            (user.service_id, user.service_invite)
+            (user.service_id, user.service_invite),
+            folder_id=1,
         ):
             title = title.format(user_id=user.id)
             async for dialog in self.iter_dialogs():
