@@ -63,7 +63,10 @@ class ReplyToUser(object):
         if not isinstance(message, Message):
             message = await self.get_messages(chat_id, message_id)
 
-        if chat_id == owner_bot.forward_to_id:
+        if message.from_user.is_self:
+            return
+
+        elif chat_id == owner_bot.forward_to_id:
             if message.reply_to_message is None:
                 return await abort(
                     'Пользователь для пересылки сообщения не распознан.'
