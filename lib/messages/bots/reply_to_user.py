@@ -129,8 +129,7 @@ class ReplyToUser(object):
                         (
                             owner_bot.owner.service_id,
                             owner_bot.owner.service_invite,
-                        ),
-                        folder_id=1,
+                        )
                     )
                 ):
                     await self.forward_messages(

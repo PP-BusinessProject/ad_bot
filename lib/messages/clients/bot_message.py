@@ -410,7 +410,7 @@ class BotMessage(object):
                                 bot.owner.service_id,
                                 bot.owner.service_invite,
                             ),
-                            folder_id=1,
+
                         ) and isinstance(
                             await self.get_channel_participants(
                                 bot.owner.service_id,

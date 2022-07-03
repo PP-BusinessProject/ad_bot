@@ -533,8 +533,7 @@ class SettingsMessage(object):
             )
 
         elif not await self.check_chats(
-            (bot.owner.service_id, bot.owner.service_invite),
-            folder_id=1,
+            (bot.owner.service_id, bot.owner.service_invite)
         ):
             return await abort(
                 'У бота нет доступа к личному каналу пользователя.'
