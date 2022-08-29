@@ -307,7 +307,7 @@ class ChatMessage(object):
             await self.storage.Session.commit()
 
         elif data.command == self.SENDER_CHAT.PERIOD_RESET:
-            chat.period = self.MOCK_CHAT_PERIOD
+            chat.period = ChatModel.period.default.arg
             await self.storage.Session.commit()
 
         elif data.command == self.SENDER_CHAT.PERIOD_CHANGE:
@@ -431,7 +431,8 @@ class ChatMessage(object):
                                 data(self.SENDER_CHAT.PERIOD_RESET),
                             )
                         ]
-                        if ChatModel.period.default is not None
+                        if getattr(ChatModel.period.default, 'arg', None)
+                        is not None
                         and chat.period != ChatModel.period.default
                         else []
                     )
