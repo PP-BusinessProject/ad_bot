@@ -199,7 +199,9 @@ class ChatMessage(object):
                         '3. Получение чатов и обновление в базе.',
                     )
                 ),
-                cancel_command=self.SENDER_CHAT.LIST,
+                cancel_command=self.SERVICE._SELF
+                if data is None or data.command == self.SENDER_CHAT._SELF
+                else self.SENDER_CHAT.PAGE,
             )
             if not isinstance(result, CategoryModel):
                 return result

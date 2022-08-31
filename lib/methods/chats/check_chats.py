@@ -41,10 +41,9 @@ class CheckChatsFloodWait(FloodWait):
         self: Self,
         checked_chats: dict[CheckChat, Chat],
         /,
-        folder_id: Optional[int] = None,
-        x: Union[int, str, RpcError] = None,
+        value: Union[int, str, RpcError] = None,
     ):
-        super().__init__(x)
+        super().__init__(value)
         self.checked_chats = checked_chats
 
 
@@ -211,7 +210,9 @@ class CheckChats(object):
                 not self.INVITE_LINK_RE.match(chat_link)
             ):
                 try:
-                    peers[chat_link] = await self.resolve_peer(chat_link)
+                    peers[chat_link] = await self.resolve_peer(
+                        chat_link, fetch=False
+                    )
                 except PeerIdInvalid:
                     pass
                 except FloodWait as e:
