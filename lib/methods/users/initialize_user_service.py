@@ -3,14 +3,12 @@
 from contextlib import suppress
 from typing import TYPE_CHECKING, Any, Iterable, Union
 
-from pyrogram.errors.exceptions.bad_request_400 import (
-    AdminsTooMuch,
-    PeerIdInvalid,
-)
+from pyrogram.errors.exceptions.bad_request_400 import (AdminsTooMuch,
+                                                        BadRequest,
+                                                        PeerIdInvalid)
 from pyrogram.errors.rpc_error import RPCError
-from pyrogram.raw.types.channel_participant_admin import (
-    ChannelParticipantAdmin,
-)
+from pyrogram.raw.types.channel_participant_admin import \
+    ChannelParticipantAdmin
 from pyrogram.raw.types.input_peer_user import InputPeerUser
 from pyrogram.types.user_and_chats.chat_privileges import ChatPrivileges
 
@@ -97,16 +95,17 @@ class InitializeUserService(object):
         promoted_participants: set[int] = set()
         demote_admins: list[ChannelParticipantAdmin] = []
         if promote_user_ids and not freshly_created:
-            admin: ChannelParticipantAdmin
-            async for admin in self.iter_channel_participants(
-                user.service_id, 'admins'
-            ):
-                if admin.user_id in promote_user_ids:
-                    promoted_participants.add(admin.user_id)
-                elif isinstance(admin, ChannelParticipantAdmin) and (
-                    not admin.is_self and demote_users
+            with suppress(BadRequest):
+                admin: ChannelParticipantAdmin
+                async for admin in self.iter_channel_participants(
+                    user.service_id, 'admins'
                 ):
-                    demote_admins.append(admin)
+                    if admin.user_id in promote_user_ids:
+                        promoted_participants.add(admin.user_id)
+                    elif isinstance(admin, ChannelParticipantAdmin) and (
+                        not admin.is_self and demote_users
+                    ):
+                        demote_admins.append(admin)
 
         demoted_admins: set[int] = set()
         for promote_id in promote_user_ids:
