@@ -18,6 +18,7 @@ from pyrogram.errors.exceptions.bad_request_400 import (
     PeerIdInvalid,
     UserAlreadyParticipant,
 )
+from pyrogram.errors.exceptions.not_acceptable_406 import NotAcceptable
 from pyrogram.errors.exceptions.flood_420 import FloodWait
 from pyrogram.errors.rpc_error import RPCError
 from pyrogram.raw.types.input_peer_channel import InputPeerChannel
@@ -227,14 +228,15 @@ class CheckChats(object):
                 if (peer := peers.get(chat_link)) is not None:
                     dialog_chats[chat_link] = await self.get_chat(peer)
         elif peers:
-            for dialog in await self.get_peer_dialogs(peers.values()):
-                if dialog.top_message is not None:
-                    for chat_link, chat in chats.items():
-                        if (peer := peers.get(chat_link)) is not None:
-                            chat_id = get_input_peer_id(peer)
-                            if chat_id == dialog.chat.id:
-                                dialog_chats[chat_link] = dialog.chat
-                                break
+            with suppress(NotAcceptable):
+                for dialog in await self.get_peer_dialogs(peers.values()):
+                    if dialog.top_message is not None:
+                        for chat_link, chat in chats.items():
+                            if (peer := peers.get(chat_link)) is not None:
+                                chat_id = get_input_peer_id(peer)
+                                if chat_id == dialog.chat.id:
+                                    dialog_chats[chat_link] = dialog.chat
+                                    break
 
         flood: int = 0
         for chat_link, chat in chats.items():
