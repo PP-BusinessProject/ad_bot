@@ -667,7 +667,7 @@ class ChatMessage(object):
             return False
 
         self.scheduler.add_job(
-            self._chats_add_notify,
+            self.storage.scoped(self._chats_add_notify),
             trigger='interval',
             seconds=1,
             id=f'add_chats_add_notify:{chat_id}',
