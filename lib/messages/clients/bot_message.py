@@ -3,6 +3,7 @@
 from contextlib import suppress
 from typing import TYPE_CHECKING, Optional, Union
 
+from pyrogram.errors.exceptions.flood_420 import FloodWait
 from pyrogram.errors.rpc_error import RPCError
 from pyrogram.raw.types.channel_participant_admin import (
     ChannelParticipantAdmin,
@@ -261,13 +262,14 @@ class BotMessage(object):
                 )
             ):
                 async with auto_init(self.get_worker(phone_number)) as worker:
-                    owner = await self.storage.Session.merge(
-                        await worker.initialize_user_service(
-                            owner, promote_users=self.username
+                    with suppress(FloodWait):
+                        owner = await self.storage.Session.merge(
+                            await worker.initialize_user_service(
+                                owner, promote_users=self.username
+                            )
                         )
-                    )
-                    await self.storage.Session.commit()
-                    break
+                        await self.storage.Session.commit()
+                        break
             else:
                 return await abort(
                     'На данный момент нет свободного бота для создания '
@@ -410,7 +412,6 @@ class BotMessage(object):
                                 bot.owner.service_id,
                                 bot.owner.service_invite,
                             ),
-
                         ) and isinstance(
                             await self.get_channel_participants(
                                 bot.owner.service_id,

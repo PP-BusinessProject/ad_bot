@@ -99,6 +99,6 @@ class SentAdModel(Base):
             [ad_chat_id, ad_message_id],
             [AdModel.chat_id, AdModel.message_id],
             onupdate='CASCADE',
-            ondelete='NO ACTION',
+            ondelete='CASCADE',
         ),
     )
