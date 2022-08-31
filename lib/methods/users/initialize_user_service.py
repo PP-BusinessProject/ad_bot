@@ -75,13 +75,17 @@ class InitializeUserService(object):
             (user.service_id, user.service_invite)
         ):
             title = title.format(user_id=user.id)
+            dialog = None
             async for dialog in self.iter_dialogs():
                 if dialog.chat.title == title:
-                    user.service_id = dialog.chat.id
-                    if user.service_invite is None:
-                        user.service_invite = dialog.chat.invite_link
+                    if dialog.chat.is_creator:
+                        user.service_id = dialog.chat.id
+                        if user.service_invite is None:
+                            user.service_invite = dialog.chat.invite_link
                     break
-            else:
+            if dialog is None or (
+                dialog.chat.title != title or not dialog.chat.is_creator
+            ):
                 freshly_created = True
                 chat = await self.create_channel(title)
                 user.service_id = chat.id
