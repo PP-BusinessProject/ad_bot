@@ -238,7 +238,7 @@ class ChatMessage(object):
                     input, message_id, Query(self.SENDER_CHAT.REFRESH)
                 )
 
-        chat = await self.storage.Session.get(ChatModel, data.args)
+        chat: ChatModel = await self.storage.Session.get(ChatModel, data.args)
         if chat is None:
             return await abort('Чат не найден.')
 
@@ -396,6 +396,9 @@ class ChatMessage(object):
                         else 'Рассылка в этот канал воспрещена.'
                         if chat.deactivated_cause
                         == CHAT_DEACTIVATED.WRITE_FORBIDDEN
+                        else 'Канал ограничен.'
+                        if chat.deactivated_cause
+                        == CHAT_DEACTIVATED.RESTRICTED
                         else 'Неизвестна.'
                     )
                     if chat.deactivated_cause is not None

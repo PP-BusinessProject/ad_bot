@@ -4,24 +4,24 @@ from datetime import timedelta
 from enum import IntEnum, auto
 from typing import TYPE_CHECKING, Final, Optional, Type
 
-from pyrogram.errors.exceptions.flood_420 import (
-    SlowmodeWait,
+from pyrogram.errors.exceptions.bad_request_400 import (
+    ChannelBanned,
+    ChannelInvalid,
+    ChannelPrivate,
+    ChatAdminRequired,
+    ChatRestricted,
+    PeerIdInvalid,
 )
+from pyrogram.errors.exceptions.flood_420 import SlowmodeWait
 from pyrogram.errors.exceptions.forbidden_403 import ChatWriteForbidden
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.expression import ClauseElement
 from sqlalchemy.sql.schema import Column, ForeignKey
-from sqlalchemy.sql.sqltypes import BigInteger, Boolean, String, Interval, Enum
+from sqlalchemy.sql.sqltypes import BigInteger, Boolean, Enum, Interval, String
 from typing_extensions import Self
-from pyrogram.errors.exceptions.bad_request_400 import (
-    PeerIdInvalid,
-    ChannelBanned,
-    ChannelInvalid,
-    ChannelPrivate,
-    ChatAdminRequired,
-)
+
 from .._mixins import Timestamped
 from ..base_interface import Base
 from ..misc.category_model import CategoryModel
@@ -41,6 +41,7 @@ class ChatDeactivatedCause(IntEnum):
     PRIVATE: Final[int] = auto()
     ADMIN_REQUIRED: Final[int] = auto()
     WRITE_FORBIDDEN: Final[int] = auto()
+    RESTRICTED: Final[int] = auto()
 
     @classmethod
     def from_exception(cls: Type[Self], exception: BaseException, /) -> Self:
@@ -59,6 +60,8 @@ class ChatDeactivatedCause(IntEnum):
             return cls.ADMIN_REQUIRED
         elif isinstance(exception, ChatWriteForbidden):
             return cls.WRITE_FORBIDDEN
+        elif isinstance(exception, ChatRestricted):
+            return cls.RESTRICTED
         else:
             return cls.UNKNOWN
 
