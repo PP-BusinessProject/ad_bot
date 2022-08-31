@@ -266,10 +266,14 @@ class SenderJob(object):
                     break
 
                 try:
-                    sent_msg = await worker.forward_messages(
-                        *(_chat.id, ad.chat_id, ad.message_id),
-                        drop_author=True,
+                    message = await worker.get_messages(
+                        ad.chat_id, ad.message_id
                     )
+                    sent_msg = await message.copy(_chat.id)
+                    # sent_msg = await worker.send_message(
+                    #     *(_chat.id, ad.chat_id, ad.message_id),
+                    #     drop_author=True,
+                    # )
                     sent_ad = SentAdModel(
                         ad_chat_id=ad.chat_id,
                         ad_message_id=ad.message_id,
