@@ -460,7 +460,7 @@ class AdBotSession(Session):
                 break
 
             task = self.client.loop.create_task(
-                self.client.storage.scoped(self.handle_packet(packet))
+                self.client.storage.scoped(self.handle_packet)(packet)
             )
             task.add_done_callback(print_exception)
 
