@@ -68,6 +68,7 @@ class StartMessage(object):
         if user is None:
             self.storage.Session.add(user := UserModel(id=chat_id))
             await self.storage.Session.commit()
+            self.logger.info(f'Registered user with id {user.id}')
         return await self.send_or_edit(
             *(chat_id, message_id),
             text='\n'.join(

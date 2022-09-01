@@ -2,6 +2,7 @@ from asyncio import AbstractEventLoop, Lock, Task, get_event_loop
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
+from logging import Logger, getLogger
 from pathlib import Path
 from typing import Any, Callable, ClassVar, Dict, Final, List, Optional, Type
 
@@ -41,6 +42,7 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
     loop: Final[AbstractEventLoop]
     storage: Final[SQLAlchemyStorage]
     scheduler: Final[AsyncIOScheduler]
+    logger: Final[Logger]
     name: Final[str]
     api_id: Final[int]
     api_hash: Final[str]
@@ -96,6 +98,7 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
         /,
         storage: SQLAlchemyStorage,
         scheduler: Optional[AsyncIOScheduler] = None,
+        logger: Optional[Logger] = None,
         api_id: Optional[int] = None,
         api_hash: Optional[str] = None,
         app_version: str = Client.APP_VERSION,
@@ -153,7 +156,7 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
         object.__setattr__(self, 'parser', Parser(self))
         object.__setattr__(self, 'message_cache', Cache(10000))
         object.__setattr__(self, 'scheduler', scheduler or AsyncIOScheduler())
-        # object.__setattr__(self, 'session', session)
+        object.__setattr__(self, 'logger', logger or getLogger('client'))
         object.__setattr__(self, 'morph', CachedMorphAnalyzer)
         object.__setattr__(self, 'groups', {})
         object.__setattr__(self, 'listeners', {})

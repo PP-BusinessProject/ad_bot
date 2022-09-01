@@ -1,5 +1,5 @@
 from asyncio import current_task
-from logging import DEBUG, basicConfig, root
+from logging import DEBUG, Filter, LogRecord, basicConfig, getLogger, root
 from os import environ
 from typing import Final
 
@@ -11,14 +11,22 @@ from sqlalchemy.ext.asyncio.scoping import async_scoped_session
 from sqlalchemy.ext.asyncio.session import AsyncSession
 from sqlalchemy.orm.session import sessionmaker
 from sqlalchemy.pool.impl import AsyncAdaptedQueuePool
+from typing_extensions import Self
 
 if __name__ == '__main__':
     from lib.ad_bot_client import AdBotClient
     from lib.models.base_interface import Base
     from lib.sqlalchemy_storage import SQLAlchemyStorage
 
-    #
+    class _CustomFilter(Filter):
+        def filter(self: Self, record: LogRecord, /) -> bool:
+            return super().filter(record) and not (
+                record.args[0].id.startswith('ping_job')
+                or record.msg.endswith('executed successfully')
+            )
+
     basicConfig(level=environ.get('LOGGING', 'INFO').strip())
+    getLogger('apscheduler.executors.default').addFilter(_CustomFilter())
     client: Final[AdBotClient] = AdBotClient(
         api_id=int(environ['ADBOT_API_ID'].strip()),
         api_hash=environ['ADBOT_API_HASH'].strip(),
@@ -46,8 +54,8 @@ if __name__ == '__main__':
                             'postgres:postgres@localhost:5432/ad_bot',
                         ).split('://')[-1],
                         poolclass=AsyncAdaptedQueuePool,
-                        pool_size=1,
-                        max_overflow=-1,
+                        pool_size=20,
+                        max_overflow=0,
                         pool_recycle=3600,
                         pool_pre_ping=True,
                         pool_use_lifo=True,
