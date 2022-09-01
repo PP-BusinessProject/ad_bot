@@ -330,7 +330,6 @@ class AdBotSession(Session):
 
         if peers:
             await self.client.fetch_peers(peers)
-            await self.client.storage.Session.remove()
 
         peers_ids = {_.id: _ for _ in peers}
         for update in updates:
@@ -460,7 +459,9 @@ class AdBotSession(Session):
                     self.client.loop.create_task(self.restart())
                 break
 
-            task = self.client.loop.create_task(self.handle_packet(packet))
+            task = self.client.loop.create_task(
+                self.client.storage.scoped(self.handle_packet(packet))
+            )
             task.add_done_callback(print_exception)
 
         log.info('NetworkTask stopped')
