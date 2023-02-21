@@ -11,21 +11,20 @@ from pymorphy2.tagset import OpencorporaTag
 from pymorphy2.units.base import BaseAnalyzerUnit
 
 
-class _BaseAnalyzerUnit(BaseAnalyzerUnit):
-    @classmethod
-    def _get_param_names(cls):
-        """
-        Get parameter names for the analyzer unit.
-        It works by introspecting `__init__` arguments.
-        `__init__` method must not use *args.
-        """
-        if cls.__init__ is object.__init__:
-            return []
-        argspec = getfullargspec(cls.__init__)
-        return sorted(argspec.args[1:])
+@classmethod
+def _get_param_names(cls):
+    """
+    Get parameter names for the analyzer unit.
+    It works by introspecting `__init__` arguments.
+    `__init__` method must not use *args.
+    """
+    if cls.__init__ is object.__init__:
+        return []
+    argspec = getfullargspec(cls.__init__)
+    return sorted(argspec.args[1:])
 
 
-BaseAnalyzerUnit._get_param_names = _BaseAnalyzerUnit._get_param_names
+BaseAnalyzerUnit._get_param_names = _get_param_names
 
 
 class CachedMorphAnalyzer(ABC):
