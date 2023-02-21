@@ -120,7 +120,7 @@ class ServiceSubscription(object):
                             SessionModel.phone_number
                             == ClientModel.phone_number
                         )
-                        .where(SessionModel.user_id.is_(chat_id)),
+                        .where(SessionModel.user_id == chat_id),
                     )
                     .order_by(ClientModel.created_at)
                 )

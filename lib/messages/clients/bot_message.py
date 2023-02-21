@@ -6,12 +6,10 @@ from typing import TYPE_CHECKING, Optional, Union
 from pyrogram.errors.exceptions.bad_request_400 import PeerIdInvalid
 from pyrogram.errors.exceptions.flood_420 import FloodWait
 from pyrogram.errors.rpc_error import RPCError
-from pyrogram.raw.types.channel_participant_admin import (
-    ChannelParticipantAdmin,
-)
-from pyrogram.raw.types.channel_participant_creator import (
-    ChannelParticipantCreator,
-)
+from pyrogram.raw.types.channel_participant_admin import \
+    ChannelParticipantAdmin
+from pyrogram.raw.types.channel_participant_creator import \
+    ChannelParticipantCreator
 from pyrogram.types import InlineKeyboardButton as IKB
 from pyrogram.types import InlineKeyboardMarkup as IKM
 from pyrogram.types import Message
@@ -264,7 +262,7 @@ class BotMessage(object):
                             SessionModel.phone_number
                             == ClientModel.phone_number
                         )
-                        .where(SessionModel.user_id.is_(chat_id)),
+                        .where(SessionModel.user_id == chat_id),
                     )
                     .order_by(ClientModel.created_at)
                 )
@@ -423,7 +421,7 @@ class BotMessage(object):
                             SessionModel.phone_number
                             == ClientModel.phone_number
                         )
-                        .where(SessionModel.user_id.is_(chat_id)),
+                        .where(SessionModel.user_id == chat_id),
                     )
                     .order_by(ClientModel.created_at)
                 )

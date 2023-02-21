@@ -305,7 +305,8 @@ class ServiceHelp(object):
                 .where(
                     exists(text('NULL')).where(
                         (SessionModel.phone_number == ClientModel.phone_number)
-                        & SessionModel.user_id.is_(chat_id)
+                        & SessionModel.user_id
+                        == chat_id
                     )
                 )
                 .order_by(ClientModel.created_at)
