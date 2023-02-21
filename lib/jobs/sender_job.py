@@ -215,7 +215,7 @@ class SenderJob(object):
                     .subquery()
                     .alias()
                 )
-                async for chat in await self.storage.Session.stream_scalars(
+                sent_ad_chats_query = (
                     select(ChatModel)
                     .join(sent_ad_chats_subquery, isouter=True)
                     .filter(
@@ -228,11 +228,14 @@ class SenderJob(object):
                             > ChatModel.period,
                         ),
                     )
-                    .order_by(
-                        int(
-                            last_ad_chat_id is None
-                            or ChatModel.id <= last_ad_chat_id
-                        ),
+                )
+                async for chat in await self.storage.Session.stream_scalars(
+                    sent_ad_chats_query.order_by(
+                        (ChatModel.id <= last_ad_chat_id).cast(Integer),
+                        nullsfirst(sent_ad_chats_subquery.c['Timestamp']),
+                    )
+                    if last_ad_chat_id is not None
+                    else sent_ad_chats_query.order_by(
                         nullsfirst(sent_ad_chats_subquery.c['Timestamp']),
                     )
                 ):
