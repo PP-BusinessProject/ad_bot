@@ -229,8 +229,10 @@ class SenderJob(object):
                         ),
                     )
                     .order_by(
-                        last_ad_chat_id is None
-                        or ChatModel.id <= last_ad_chat_id,
+                        int(
+                            last_ad_chat_id is None
+                            or ChatModel.id <= last_ad_chat_id
+                        ),
                         nullsfirst(sent_ad_chats_subquery.c['Timestamp']),
                     )
                 ):
