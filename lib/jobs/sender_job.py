@@ -30,7 +30,7 @@ from sqlalchemy.orm import contains_eager, noload, with_parent
 from sqlalchemy.sql.expression import exists, nullsfirst, or_, text, update
 from sqlalchemy.sql.functions import max as sql_max
 from sqlalchemy.sql.functions import now
-from sqlalchemy.sql.sqltypes import SmallInteger
+from sqlalchemy.sql.sqltypes import Integer
 
 from ..models.bots.chat_model import ChatDeactivatedCause, ChatModel
 from ..models.bots.client_model import ClientModel
@@ -135,7 +135,7 @@ class SenderJob(object):
                     )
                     .order_by(
                         (ClientModel.phone_number != bot.phone_number).cast(
-                            SmallInteger
+                            Integer
                         )
                     )
                 )
