@@ -105,10 +105,11 @@ class ReplyToUser(object):
                 )
 
         else:
-            with suppress(RPCError):
-                await self.forward_messages(
-                    owner_bot.forward_to_id, chat_id, message_id
-                )
+            if owner_bot.forward_to_id is not None:
+                with suppress(RPCError):
+                    await self.forward_messages(
+                        owner_bot.forward_to_id, chat_id, message_id
+                    )
             replied: bool = False
             try:
                 if owner_bot.reply_message_id is not None and (

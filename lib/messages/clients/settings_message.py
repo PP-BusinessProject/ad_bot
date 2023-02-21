@@ -162,7 +162,7 @@ class SettingsMessage(object):
                 bot.reply_message_id = None
 
             elif data.command == self.SETTINGS_DELETE.CONTACT_CONFIRM:
-                bot.forward_to_id = bot.owner.id
+                bot.forward_to_id = None
 
             elif data.command == self.SETTINGS_DELETE.AVATAR_CONFIRM and (
                 bot.avatar_message_id is not None
@@ -262,7 +262,7 @@ class SettingsMessage(object):
                             if bot.forward_to_id == chat_id
                             else 'пользователь',
                         )
-                        if bot.forward_to_id
+                        if bot.forward_to_id is not None
                         else None,
                         '**Автоответ:** __Есть__'
                         if bot.reply_message_id is not None
@@ -350,11 +350,12 @@ class SettingsMessage(object):
                         (
                             [
                                 IKB(
-                                    'Сбросить Контакт',
+                                    'Удалить Контакт',
                                     data(self.SETTINGS_DELETE.CONTACT),
                                 )
                             ]
-                            if bot.forward_to_id != bot.owner.id
+                            if bot.forward_to_id is not None
+                            and bot.forward_to_id != bot.owner.id
                             else []
                         )
                         + [

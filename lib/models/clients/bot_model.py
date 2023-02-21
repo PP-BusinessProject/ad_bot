@@ -95,10 +95,7 @@ class BotModel(Timestamped, Base):
         primary_key=True,
         autoincrement=True,
     )
-    forward_to_id: Final = Column(
-        UserModel.id.type,
-        nullable=False,
-    )
+    forward_to_id: Final[Column[Optional[int]]] = Column(UserModel.id.type)
     reply_message_id: Final[Column[Optional[int]]] = Column(
         Integer,
         CheckConstraint('reply_message_id > 0'),

@@ -6,10 +6,12 @@ from typing import TYPE_CHECKING, Optional, Union
 from pyrogram.errors.exceptions.bad_request_400 import PeerIdInvalid
 from pyrogram.errors.exceptions.flood_420 import FloodWait
 from pyrogram.errors.rpc_error import RPCError
-from pyrogram.raw.types.channel_participant_admin import \
-    ChannelParticipantAdmin
-from pyrogram.raw.types.channel_participant_creator import \
-    ChannelParticipantCreator
+from pyrogram.raw.types.channel_participant_admin import (
+    ChannelParticipantAdmin,
+)
+from pyrogram.raw.types.channel_participant_creator import (
+    ChannelParticipantCreator,
+)
 from pyrogram.types import InlineKeyboardButton as IKB
 from pyrogram.types import InlineKeyboardMarkup as IKM
 from pyrogram.types import Message
@@ -296,7 +298,6 @@ class BotMessage(object):
             bot: BotModel = BotModel(
                 id=bots_count,
                 owner_id=bot_owner_id,
-                forward_to_id=bot_owner_id,
                 owner=owner,
             )
             ads_count = banned_ads_count = 0
@@ -340,7 +341,7 @@ class BotMessage(object):
                                 id=bot.forward_to_id,
                                 name='пользователь',
                             )
-                            if bot.forward_to_id
+                            if bot.forward_to_id is not None
                             else None,
                             '**Автоответ:** __Есть__'
                             if bot.reply_message_id is not None
@@ -518,7 +519,9 @@ class BotMessage(object):
 
         bot_valid: Optional[bool] = None
         bot_has_forward_peer: bool = False
-        if bot.phone_number is not None and chat_id == bot.owner.id:
+        if bot.phone_number is not None and (
+            chat_id == bot.owner.id and bot.forward_to_id is not None
+        ):
             bot_worker = self.get_worker(bot.phone_number)
             if bot_valid := await bot_worker.validate():
                 async with auto_init(bot_worker):
@@ -588,7 +591,9 @@ class BotMessage(object):
                     'необходимо написать ему в личные сообщения.'.format(
                         link=f't.me/+{bot.phone_number}'
                     )
-                    if bot_valid and not bot_has_forward_peer
+                    if bot.forward_to_id is not None
+                    and bot_valid
+                    and not bot_has_forward_peer
                     else None,
                 )
                 if _ is not None
