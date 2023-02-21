@@ -1,14 +1,14 @@
 """The module that provides an `AdModel`."""
 
-from typing import TYPE_CHECKING, Final, Optional, Type
+from typing import TYPE_CHECKING, Final, List, Optional, Self, Type
 
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.expression import ClauseElement, and_, or_
 from sqlalchemy.sql.schema import Column
-from sqlalchemy.sql.sqltypes import Boolean, BigInteger
-from typing_extensions import Self
+from sqlalchemy.sql.sqltypes import BigInteger, Boolean
 
 from .._mixins import Timestamped
 from ..base_interface import Base
@@ -53,55 +53,38 @@ class ClientModel(Timestamped, Base):
             database.
     """
 
-    phone_number: Final[Column[int]] = Column(
-        'PhoneNumber',
-        BigInteger,
-        primary_key=True,
-        key='phone_number',
-    )
+    phone_number: Final[Column[int]] = Column(BigInteger, primary_key=True)
     restricted: Final[Column[Optional[bool]]] = Column(
-        'Restricted',
-        Boolean(create_constraint=True),
-        key='restricted',
+        Boolean(create_constraint=True)
     )
     scam: Final[Column[Optional[bool]]] = Column(
-        'Scam',
-        Boolean(create_constraint=True),
-        key='scam',
+        Boolean(create_constraint=True)
     )
     fake: Final[Column[Optional[bool]]] = Column(
-        'Fake',
         Boolean(create_constraint=True),
-        key='fake',
     )
     deleted: Final[Column[Optional[bool]]] = Column(
-        'Deleted',
         Boolean(create_constraint=True),
-        key='deleted',
     )
     warmup: Final[Column[bool]] = Column(
-        'Warmup',
         Boolean(create_constraint=True),
         nullable=False,
         default=True,
-        key='warmup',
     )
     active: Final[Column[bool]] = Column(
-        'Active',
         Boolean(create_constraint=True),
         nullable=False,
         default=True,
-        key='active',
     )
-    owner_bot: Final['RelationshipProperty[BotModel]'] = relationship(
+    owner_bot: Mapped['RelationshipProperty[BotModel]'] = relationship(
         'BotModel',
         back_populates='sender_client',
         lazy='joined',
         cascade='save-update',
         uselist=False,
     )
-    user_replies: Final[
-        'RelationshipProperty[list[ReplyModel]]'
+    user_replies: Mapped[
+        'RelationshipProperty[List[ReplyModel]]'
     ] = relationship(
         'ReplyModel',
         back_populates='sender_client',

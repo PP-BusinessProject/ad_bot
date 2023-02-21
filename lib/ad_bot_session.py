@@ -1,4 +1,5 @@
 from asyncio import Event, Task, TimeoutError, sleep, wait_for
+from bisect import insort
 from contextlib import suppress
 from ctypes import Union
 from datetime import datetime
@@ -6,13 +7,14 @@ from hashlib import sha1
 from io import BytesIO
 from os import urandom
 from traceback import print_exc
-from typing import TYPE_CHECKING, Final, Optional
+from typing import TYPE_CHECKING, Final, Mapping, Optional, Self
 
 from apscheduler.job import Job
 from apscheduler.jobstores.base import JobLookupError
 from apscheduler.triggers.interval import IntervalTrigger
 from pyrogram import crypto_executor
 from pyrogram.client import Client
+from pyrogram.connection.connection import Connection
 from pyrogram.crypto.mtproto import pack, unpack
 from pyrogram.errors import AuthKeyDuplicated
 from pyrogram.errors import BadMsgNotification as BadMsgNotificationError
@@ -74,10 +76,8 @@ from pyrogram.session.internals import MsgFactory, MsgId
 from pyrogram.session.session import Session, log
 from pyrogram.types.messages_and_media.message import Message
 from pyrogram.utils import get_peer_id
-from typing_extensions import Self
 
 from .ad_bot_auth import AdBotAuth
-from .ad_bot_connection import AdBotConnection
 from .ad_bot_handler import AdBotHandler
 from .utils.query import Query
 
@@ -92,16 +92,22 @@ class Result(object):
 
 
 class AdBotSession(Session):
-
     START_TIMEOUT: Final[int] = 1
     WAIT_TIMEOUT: Final[int] = 15
     SLEEP_THRESHOLD: Final[int] = 10
     MAX_RETRIES: Final[int] = 5
     ACKS_THRESHOLD: Final[int] = 8
     PING_INTERVAL: Final[int] = 5
+    STORED_MSG_IDS_MAX_SIZE: Final[int] = 2000
+
+    TRANSPORT_ERRORS: Final[Mapping[int, str]] = {
+        404: 'auth key not found',
+        429: 'transport flood',
+        444: 'invalid DC',
+    }
 
     client: Final['AdBotClient']
-    connection: Optional[AdBotConnection] = None
+    connection: Optional[Connection] = None
     ping_job: Optional[Job] = None
 
     def __init__(
@@ -130,16 +136,15 @@ class AdBotSession(Session):
         self.ping_job = None
         self.network_task = None
         self.auth_key_id = None
-        self.is_connected = Event()
+        self.is_started = Event()
 
     async def start(self: Self, /) -> None:
-        self.connection = AdBotConnection(
+        self.connection = Connection(
             self.dc_id,
             self.test_mode,
             self.client.ipv6,
             self.client.proxy,
             self.is_media,
-            # mode=0,
         )
 
         while True:
@@ -206,7 +211,7 @@ class AdBotSession(Session):
             else:
                 break
 
-        self.is_connected.set()
+        self.is_started.set()
 
     async def stop(self: Self, /) -> None:
         chats = self.client.Registry.get(self.client.storage.phone_number, {})
@@ -215,12 +220,13 @@ class AdBotSession(Session):
                 for task in tasks:
                     task.cancel()
 
-        self.is_connected.clear()
+        self.stored_msg_ids.clear()
+        self.is_started.clear()
         if self.ping_job is not None:
             with suppress(JobLookupError):
                 self.ping_job.remove()
 
-        self.connection.close()
+        await self.connection.close()
         if self.network_task is not None:
             await self.network_task
 
@@ -238,18 +244,14 @@ class AdBotSession(Session):
         await self.start()
 
     async def handle_packet(self: Self, packet: bytes, /) -> None:
-        try:
-            data = await self.client.loop.run_in_executor(
-                crypto_executor,
-                unpack,
-                BytesIO(packet),
-                self.session_id,
-                self.auth_key,
-                self.auth_key_id,
-                self.stored_msg_ids,
-            )
-        except SecurityCheckMismatch:
-            return self.connection.close()
+        data = await self.client.loop.run_in_executor(
+            crypto_executor,
+            unpack,
+            BytesIO(packet),
+            self.session_id,
+            self.auth_key,
+            self.auth_key_id,
+        )
 
         updates: list[TLObject] = []
         peers: list[Union[User, Chat, Channel]] = []
@@ -258,11 +260,48 @@ class AdBotSession(Session):
             if isinstance(data.body, MsgContainer)
             else (data,)
         ):
-            if message.seq_no == 0:
-                MsgId.set_server_time(message.msg_id / (2**32))
-            elif message.seq_no % 2 != 0:
-                if message.msg_id not in self.pending_acks:
-                    self.pending_acks.add(message.msg_id)
+            if message.seq_no % 2 != 0:
+                if message.msg_id in self.pending_acks:
+                    continue
+                self.pending_acks.add(message.msg_id)
+
+            try:
+                if len(self.stored_msg_ids) > self.STORED_MSG_IDS_MAX_SIZE:
+                    del self.stored_msg_ids[
+                        : self.STORED_MSG_IDS_MAX_SIZE // 2
+                    ]
+
+                if self.stored_msg_ids:
+                    if message.msg_id < self.stored_msg_ids[0]:
+                        raise SecurityCheckMismatch(
+                            'The msg_id is lower than all the stored values'
+                        )
+
+                    if message.msg_id in self.stored_msg_ids:
+                        raise SecurityCheckMismatch(
+                            'The msg_id is equal to any of the stored values'
+                        )
+
+                    time_diff = (message.msg_id - MsgId()) / 2**32
+
+                    if time_diff > 30:
+                        raise SecurityCheckMismatch(
+                            'The msg_id belongs to over 30 seconds in the '
+                            'future. Most likely the client time has to be '
+                            'synchronized.'
+                        )
+
+                    if time_diff < -300:
+                        raise SecurityCheckMismatch(
+                            'The msg_id belongs to over 300 seconds in the '
+                            'past. Most likely the client time has to be '
+                            'synchronized.'
+                        )
+            except SecurityCheckMismatch as e:
+                log.warning('Discarding packet: %s', e)
+                return await self.connection.close()
+            else:
+                insort(self.stored_msg_ids, message.msg_id)
 
             if isinstance(message.body, (MsgDetailedInfo, MsgNewDetailedInfo)):
                 self.pending_acks.add(message.body.answer_msg_id)
@@ -455,7 +494,7 @@ class AdBotSession(Session):
             if packet is None or len(packet) == 4:
                 if packet:
                     print(f"Server sent '{Int.read(BytesIO(packet))}'")
-                if self.is_connected.is_set():
+                if self.is_started.is_set():
                     self.client.loop.create_task(self.restart())
                 break
 
@@ -522,7 +561,7 @@ class AdBotSession(Session):
         sleep_threshold: float = SLEEP_THRESHOLD,
     ) -> TLObject:
         with suppress(TimeoutError):
-            await wait_for(self.is_connected.wait(), self.WAIT_TIMEOUT)
+            await wait_for(self.is_started.wait(), self.WAIT_TIMEOUT)
 
         query = data
         if isinstance(data, (InvokeWithoutUpdates, InvokeWithTakeout)):

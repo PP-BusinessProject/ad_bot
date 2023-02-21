@@ -1,18 +1,19 @@
 """The module that provides a `UserRole` and `UserModel`."""
 
 from datetime import datetime, timedelta
-from enum import IntEnum, auto
-from typing import TYPE_CHECKING, Final, Optional, Type
+from enum import StrEnum
+from typing import TYPE_CHECKING, Final, List, Optional, Self, Type
 
 from dateutil.tz.tz import tzlocal
+from sqlalchemy import CheckConstraint
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.expression import ClauseElement, and_, or_
 from sqlalchemy.sql.functions import now
 from sqlalchemy.sql.schema import Column, ForeignKey
 from sqlalchemy.sql.sqltypes import BigInteger, DateTime, Enum, Integer, String
-from typing_extensions import Self
 
 from .._mixins import Timestamped
 from ..base_interface import Base
@@ -22,15 +23,15 @@ if TYPE_CHECKING:
     from .bot_model import BotModel
 
 
-class UserRole(IntEnum):
+class UserRole(StrEnum):
     """The role of a `UserModel`."""
 
-    USER: Final[int] = auto()
-    SUPPORT: Final[int] = auto()
-    ADMIN: Final[int] = auto()
+    USER: Final[int] = 'USER'
+    SUPPORT: Final[int] = 'SUPPORT'
+    ADMIN: Final[int] = 'ADMIN'
 
     @property
-    def name(self: Self, /) -> str:
+    def translation(self: Self, /) -> str:
         if self == self.ADMIN:
             return 'администратор'
         elif self == self.SUPPORT:
@@ -82,57 +83,41 @@ class UserModel(Timestamped, Base):
             The bots that belong to this user. If any were fetched yet.
     """
 
-    id: Final[Column[int]] = Column(
-        'Id',
-        BigInteger,
-        primary_key=True,
-        key='id',
-    )
-    role: Final[Column[UserRole]] = Column(
-        'Role',
-        Enum(UserRole),
+    id: Final[Column[int]] = Column(BigInteger, primary_key=True)
+    role: Final[Column[int]] = Column(
+        Enum(UserRole, validate_strings=False),
         nullable=False,
         default=UserRole.USER,
-        key='role',
     )
     service_id: Final[Column[Optional[int]]] = Column(
-        'ServiceId',
         BigInteger,
         unique=True,
-        key='service_id',
     )
     service_invite: Final[Column[Optional[str]]] = Column(
-        'ServiceInvite',
         String,
+        CheckConstraint("service_invite <> ''"),
         unique=True,
-        key='service_invite',
     )
     subscription_message_id: Final[Column[Optional[int]]] = Column(
-        'SubscriptionMessageId',
         Integer,
-        key='subscription_message_id',
+        CheckConstraint('subscription_message_id > 0'),
     )
     help_message_id: Final[Column[Optional[int]]] = Column(
-        'HelpMessageId',
         Integer,
-        key='help_message_id',
+        CheckConstraint('help_message_id > 0'),
     )
     subscription_from: Final[Column[Optional[datetime]]] = Column(
-        'SubscriptionFrom',
         DateTime(timezone=True),
-        key='subscription_from',
     )
     subscription_period: Final[Column[Optional[timedelta]]] = Column(
-        'SubscriptionPeriod',
         SubscriptionModel.period.type,
         ForeignKey(
             SubscriptionModel.period,
             onupdate='RESTRICT',
             ondelete='RESTRICT',
         ),
-        key='subscription_period',
     )
-    subscription: Final[
+    subscription: Mapped[
         'RelationshipProperty[Optional[SubscriptionModel]]'
     ] = relationship(
         'SubscriptionModel',
@@ -141,7 +126,7 @@ class UserModel(Timestamped, Base):
         cascade='save-update',
         uselist=False,
     )
-    bots: Final['RelationshipProperty[list[BotModel]]'] = relationship(
+    bots: Mapped['RelationshipProperty[List[BotModel]]'] = relationship(
         'BotModel',
         back_populates='owner',
         lazy='noload',
@@ -152,7 +137,7 @@ class UserModel(Timestamped, Base):
     @hybrid_property
     def is_subscribed(self: Self, /) -> bool:
         """If this user has an active subscription."""
-        return self.role >= UserRole.SUPPORT or (
+        return self.role in {UserRole.SUPPORT, UserRole.ADMIN} or (
             self.subscription_from is not None
             and self.subscription_period is not None
             and self.subscription_from
@@ -163,7 +148,7 @@ class UserModel(Timestamped, Base):
     def is_subscribed(cls: Type[Self], /) -> ClauseElement:  # noqa: N805
         """Check that user :meth:`.is_subscribed`."""
         return or_(
-            cls.role >= UserRole.SUPPORT,
+            cls.role.cast(String).in_({UserRole.SUPPORT, UserRole.ADMIN}),
             and_(
                 cls.subscription_from.is_not(None),
                 cls.subscription_period.is_not(None),

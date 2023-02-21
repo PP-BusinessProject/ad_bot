@@ -4,15 +4,15 @@ from hashlib import sha1
 from io import BytesIO
 from os import urandom
 from time import monotonic, time
-from typing import Final
+from typing import ClassVar, Final, Self
 
 from pyrogram import raw
 from pyrogram.connection.connection import Connection
 from pyrogram.crypto import aes, prime, rsa
 from pyrogram.errors import SecurityCheckMismatch
-from pyrogram.raw.core import TLObject
+from pyrogram.raw.core import Int, Long, TLObject
 from pyrogram.session.auth import Auth, log
-from typing_extensions import Self
+from pyrogram.session.internals import MsgId
 
 
 @dataclass(init=False, frozen=True)
@@ -22,11 +22,29 @@ class AdBotAuth(Auth):
     def __init__(self: Self, /, connection: Connection) -> None:
         object.__setattr__(self, 'connection', connection)
 
+    @staticmethod
+    def pack(data: TLObject) -> bytes:
+        return bytes(8) + Long(MsgId()) + Int(len(data.write())) + data.write()
+
+    @staticmethod
+    def unpack(b: BytesIO):
+        b.seek(
+            20
+        )  # Skip auth_key_id (8), message_id (8) and message_length (4)
+        return TLObject.read(b)
+
+    async def invoke(self, data: TLObject):
+        data = self.pack(data)
+        await self.connection.send(data)
+        response = BytesIO(await self.connection.recv())
+
+        return self.unpack(response)
+
     async def create(self: Self, /) -> bytes:
-        """
+        '''
         https://core.telegram.org/mtproto/auth_key
         https://core.telegram.org/mtproto/samples-auth_key
-        """
+        '''
         retries_left = self.MAX_RETRIES
 
         # The server may close the connection at any time, causing the auth key creation to fail.
@@ -186,19 +204,30 @@ class AdBotAuth(Auth):
                 # Security checks
                 #######################
 
-                SecurityCheckMismatch.check(dh_prime == prime.CURRENT_DH_PRIME)
+                SecurityCheckMismatch.check(
+                    dh_prime == prime.CURRENT_DH_PRIME,
+                    'dh_prime == prime.CURRENT_DH_PRIME',
+                )
                 log.debug('DH parameters check: OK')
 
                 # https://core.telegram.org/mtproto/security_guidelines#g-a-and-g-b-validation
                 g_b = int.from_bytes(g_b, 'big')
-                SecurityCheckMismatch.check(1 < g < dh_prime - 1)
-                SecurityCheckMismatch.check(1 < g_a < dh_prime - 1)
-                SecurityCheckMismatch.check(1 < g_b < dh_prime - 1)
                 SecurityCheckMismatch.check(
-                    2 ** (2048 - 64) < g_a < dh_prime - 2 ** (2048 - 64)
+                    1 < g < dh_prime - 1, '1 < g < dh_prime - 1'
                 )
                 SecurityCheckMismatch.check(
-                    2 ** (2048 - 64) < g_b < dh_prime - 2 ** (2048 - 64)
+                    1 < g_a < dh_prime - 1, '1 < g_a < dh_prime - 1'
+                )
+                SecurityCheckMismatch.check(
+                    1 < g_b < dh_prime - 1, '1 < g_b < dh_prime - 1'
+                )
+                SecurityCheckMismatch.check(
+                    2 ** (2048 - 64) < g_a < dh_prime - 2 ** (2048 - 64),
+                    '2 ** (2048 - 64) < g_a < dh_prime - 2 ** (2048 - 64)',
+                )
+                SecurityCheckMismatch.check(
+                    2 ** (2048 - 64) < g_b < dh_prime - 2 ** (2048 - 64),
+                    '2 ** (2048 - 64) < g_b < dh_prime - 2 ** (2048 - 64)',
                 )
                 log.debug('g_a and g_b validation: OK')
 
@@ -207,27 +236,36 @@ class AdBotAuth(Auth):
                     server_dh_inner_data.write()
                 )  # Call .write() to remove padding
                 SecurityCheckMismatch.check(
-                    answer_with_hash[:20] == sha1(answer).digest()
+                    answer_with_hash[:20] == sha1(answer).digest(),
+                    'answer_with_hash[:20] == sha1(answer).digest()',
                 )
                 log.debug('SHA1 hash values check: OK')
 
                 # https://core.telegram.org/mtproto/security_guidelines#checking-nonce-server-nonce-and-new-nonce-fields
                 # 1st message
-                SecurityCheckMismatch.check(nonce == res_pq.nonce)
+                SecurityCheckMismatch.check(
+                    nonce == res_pq.nonce, 'nonce == res_pq.nonce'
+                )
                 # 2nd message
                 server_nonce = int.from_bytes(
                     server_nonce, 'little', signed=True
                 )
-                SecurityCheckMismatch.check(nonce == server_dh_params.nonce)
                 SecurityCheckMismatch.check(
-                    server_nonce == server_dh_params.server_nonce
+                    nonce == server_dh_params.nonce,
+                    'nonce == server_dh_params.nonce',
+                )
+                SecurityCheckMismatch.check(
+                    server_nonce == server_dh_params.server_nonce,
+                    'server_nonce == server_dh_params.server_nonce',
                 )
                 # 3rd message
                 SecurityCheckMismatch.check(
-                    nonce == set_client_dh_params_answer.nonce
+                    nonce == set_client_dh_params_answer.nonce,
+                    'nonce == set_client_dh_params_answer.nonce',
                 )
                 SecurityCheckMismatch.check(
-                    server_nonce == set_client_dh_params_answer.server_nonce
+                    server_nonce == set_client_dh_params_answer.server_nonce,
+                    'server_nonce == set_client_dh_params_answer.server_nonce',
                 )
                 server_nonce = server_nonce.to_bytes(16, 'little', signed=True)
                 log.debug('Nonce fields check: OK')
@@ -236,8 +274,7 @@ class AdBotAuth(Auth):
                 server_salt = aes.xor(new_nonce[:8], server_nonce[:8])
 
                 log.debug(
-                    'Server salt: %s',
-                    int.from_bytes(server_salt, 'little'),
+                    'Server salt: %s', int.from_bytes(server_salt, 'little')
                 )
 
                 log.info(

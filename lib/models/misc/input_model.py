@@ -2,17 +2,27 @@
 
 from __future__ import annotations
 
-from typing import TYPE_CHECKING, Callable, Final, Generic, Optional, TypeVar
+from typing import (
+    TYPE_CHECKING,
+    Callable,
+    Final,
+    Generic,
+    List,
+    Optional,
+    TypeVar,
+)
 
+from sqlalchemy import CheckConstraint
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.schema import Column
-from sqlalchemy.sql.sqltypes import BigInteger, Boolean, Enum, Integer, String
+from sqlalchemy.sql.sqltypes import BigInteger, Boolean, Integer, String
 
 from ...utils.query import Query, QueryType
 from .._types import LocalFunction
 from ..base_interface import Base
-from ..clients.user_model import UserRole
+from ..clients.user_model import UserModel, UserRole
 
 if TYPE_CHECKING:
     from .input_message_model import InputMessageModel
@@ -79,94 +89,58 @@ class InputModel(Generic[T], Base):
     """
 
     chat_id: Final[Column[int]] = Column(
-        'ChatId',
         BigInteger,
         primary_key=True,
-        key='chat_id',
     )
     message_id: Final[Column[Optional[int]]] = Column(
-        'MessageId',
         Integer,
-        key='message_id',
+        CheckConstraint('message_id > 0'),
     )
-    data: Final[Column[Optional[Query]]] = Column(
-        'Data',
-        QueryType,
-        key='data',
-    )
+    data: Final[Column[Optional[Query]]] = Column(QueryType)
     on_response: Final[Column[Optional[Callable[..., bool]]]] = Column(
-        'OnResponse',
-        LocalFunction,
-        key='on_response',
+        LocalFunction
     )
     on_finished: Final[Column[Optional[Callable[..., T]]]] = Column(
-        'OnFinished',
         LocalFunction,
-        key='on_finished',
     )
     do_add_message: Final[Column[bool]] = Column(
-        'DoAddMessage',
         Boolean(create_constraint=True),
         nullable=False,
         default=True,
-        key='do_add_message',
     )
     clear_used_messages: Final[Column[bool]] = Column(
-        'ClearUsedMessages',
         Boolean(create_constraint=True),
         nullable=False,
         default=True,
-        key='clear_used_messages',
     )
     group: Final[Column[int]] = Column(
-        'Group',
         Integer,
         nullable=False,
         default=0,
-        key='group',
     )
-    query_pattern: Final[Optional[str]] = Column(
-        'QueryPattern',
-        String,
-        key='query_pattern',
-    )
-    user_role: Final[Column[Optional[UserRole]]] = Column(
-        'UserRole',
-        Enum(UserRole),
-        key='user_role',
-    )
+    query_pattern: Final[Optional[str]] = Column(String)
+    user_role: Final[Column[Optional[UserRole]]] = Column(UserModel.role.type)
     calls_count: Final[Column[Optional[int]]] = Column(
-        'CallsCount',
         Integer,
+        CheckConstraint('calls_count > 0'),
         default=1,
-        key='calls_count',
     )
-    action: Final[Column[Optional[str]]] = Column(
-        'Action',
-        String,
-        key='action',
-    )
+    action: Final[Column[Optional[str]]] = Column(String)
     private: Final[Column[bool]] = Column(
-        'Private',
         Boolean(create_constraint=True),
         nullable=False,
         default=True,
-        key='private',
     )
     replace_calls: Final[Column[bool]] = Column(
-        'ReplaceCalls',
         Boolean(create_constraint=True),
         nullable=False,
         default=False,
-        key='replace_calls',
     )
     success: Final[Column[Optional[bool]]] = Column(
-        'Success',
         Boolean(create_constraint=True),
-        key='success',
     )
-    used_messages: Final[
-        'RelationshipProperty[list[InputMessageModel]]'
+    used_messages: Mapped[
+        'RelationshipProperty[List[InputMessageModel]]'
     ] = relationship(
         'InputMessageModel',
         back_populates='input',

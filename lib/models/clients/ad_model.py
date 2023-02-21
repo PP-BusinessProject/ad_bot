@@ -1,27 +1,18 @@
 """The module that provides an `AdModel`."""
 
-from typing import (
-    TYPE_CHECKING,
-    Any,
-    Dict,
-    Final,
-    Optional,
-    Tuple,
-    Type,
-    Union,
-)
+from typing import TYPE_CHECKING, Final, List, Optional, Self, Type
 
-from sqlalchemy import ForeignKey
+from sqlalchemy import CheckConstraint, ForeignKey
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.expression import ClauseElement, and_
-from sqlalchemy.sql.schema import Column, ForeignKeyConstraint, SchemaItem
+from sqlalchemy.sql.schema import Column, ForeignKeyConstraint
 from sqlalchemy.sql.sqltypes import Boolean, Integer
-from typing_extensions import Self
 
 from .._mixins import Timestamped
-from ..base_interface import Base
+from ..base_interface import Base, TableArgs
 from ..misc.category_model import CategoryModel
 from .bot_model import BotModel, UserModel
 
@@ -71,70 +62,56 @@ class AdModel(Timestamped, Base):
             database.
     """
 
-    bot_owner_id: Final[Column[int]] = Column(
-        'BotOwnerId',
+    bot_owner_id: Final = Column(
         BotModel.owner_id.type,
         nullable=False,
-        key='bot_owner_id',
     )
-    bot_id: Final[Column[int]] = Column(
-        'BotId',
+    bot_id: Final = Column(
         BotModel.id.type,
         nullable=False,
-        key='bot_id',
     )
-    chat_id: Final[Column[int]] = Column(
-        'ChatId',
+    chat_id: Final = Column(
         UserModel.service_id.type,
         primary_key=True,
-        key='chat_id',
     )
-    message_id: Final[Column[int]] = Column(
-        'MessageId',
+    message_id: Final = Column(
         Integer,
+        CheckConstraint('message_id > 0'),
         primary_key=True,
-        key='message_id',
     )
     category_id: Final[Column[Optional[int]]] = Column(
-        'CategoryId',
         CategoryModel.id.type,
         ForeignKey(CategoryModel.id, onupdate='CASCADE', ondelete='SET NULL'),
-        key='category_id',
     )
     confirm_message_id: Column[Optional[int]] = Column(
-        'ConfirmMessageId',
         Integer,
-        key='confirm_message_id',
+        CheckConstraint(
+            'confirm_message_id IS NULL OR confirm_message_id > 0'
+        ),
     )
     active: Column[bool] = Column(
-        'Active',
         Boolean(create_constraint=True),
         nullable=False,
         default=False,
-        key='active',
     )
     banned: Column[bool] = Column(
-        'Banned',
         Boolean(create_constraint=True),
         nullable=False,
         default=False,
-        key='banned',
     )
     corrupted: Column[bool] = Column(
-        'Corrupted',
         Boolean(create_constraint=True),
         nullable=False,
         default=False,
-        key='corrupted',
     )
-    owner_bot: Final['RelationshipProperty[BotModel]'] = relationship(
+    owner_bot: Mapped['RelationshipProperty[BotModel]'] = relationship(
         'BotModel',
         back_populates='ads',
         lazy='joined',
         cascade='save-update',
         uselist=False,
     )
-    category: Final[
+    category: Mapped[
         'RelationshipProperty[Optional[CategoryModel]]'
     ] = relationship(
         'CategoryModel',
@@ -143,7 +120,7 @@ class AdModel(Timestamped, Base):
         cascade='save-update',
         uselist=False,
     )
-    sent_ads: Final['RelationshipProperty[list[SentAdModel]]'] = relationship(
+    sent_ads: Mapped['RelationshipProperty[List[SentAdModel]]'] = relationship(
         'SentAdModel',
         back_populates='ad',
         lazy='noload',
@@ -151,7 +128,7 @@ class AdModel(Timestamped, Base):
         uselist=True,
     )
 
-    __table_args__: Final[Tuple[Union[SchemaItem, Dict[str, Any]], ...]] = (
+    __table_args__: Final[TableArgs] = (
         ForeignKeyConstraint(
             [bot_owner_id, bot_id],
             [BotModel.owner_id, BotModel.id],

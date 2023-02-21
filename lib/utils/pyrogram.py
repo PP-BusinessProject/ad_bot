@@ -19,12 +19,11 @@ from typing import (
     Iterable,
     Optional,
     ParamSpec,
+    Self,
     Type,
     TypeVar,
     Union,
 )
-
-from typing_extensions import Self
 
 from pyrogram.client import Client
 from pyrogram.errors import RPCError

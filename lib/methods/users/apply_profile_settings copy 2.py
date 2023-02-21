@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING
 from pyrogram.errors.rpc_error import RPCError
 from pyrogram.types.messages_and_media.message import Message
 from sqlalchemy.sql.expression import select
+from sqlalchemy.sql.sqltypes import String
 
 from ...models.clients.bot_model import BotModel
 from ...models.clients.user_model import UserModel, UserRole
@@ -48,14 +49,18 @@ class ApplyProfileSettings(object):
         with suppress(RPCError):
             _ = 'Владелец'
             await self.add_contact(bot.owner.id, _, share_phone_number=True)
-        if bot.owner.role < UserRole.ADMIN:
+        if bot.owner.role != UserRole.ADMIN:
             role: UserRole
             async for user_id, role in await self.storage.Session.stream(
                 select(UserModel.id, UserModel.role)
-                .where(UserModel.role >= UserRole.SUPPORT)
+                .where(
+                    UserModel.role.cast(String).in_(
+                        {UserRole.SUPPORT, UserRole.ADMIN}
+                    )
+                )
                 .where(UserModel.id != bot.owner.id)
             ):
-                _ = ' '.join((role.name.capitalize(), str(user_id)))
+                _ = ' '.join((role.translation.capitalize(), str(user_id)))
                 await self.add_contact(user_id, _, share_phone_number=True)
 
         with suppress(RPCError):

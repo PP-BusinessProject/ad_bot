@@ -3,6 +3,7 @@
 from contextlib import suppress
 from typing import TYPE_CHECKING, Optional, Union
 
+from pyrogram.errors.exceptions.bad_request_400 import PeerIdInvalid
 from pyrogram.errors.exceptions.flood_420 import FloodWait
 from pyrogram.errors.rpc_error import RPCError
 from pyrogram.raw.types.channel_participant_admin import (
@@ -18,6 +19,7 @@ from sqlalchemy.orm import contains_eager
 from sqlalchemy.orm.util import with_parent
 from sqlalchemy.sql.expression import exists, select, text, update
 from sqlalchemy.sql.functions import count
+from sqlalchemy.sql.sqltypes import String
 
 from ...models.bots.client_model import ClientModel
 from ...models.clients.ad_model import AdModel
@@ -101,8 +103,14 @@ class BotMessage(object):
         user_role: UserRole = await self.storage.Session.scalar(
             select(UserModel.role).filter_by(id=chat_id).limit(1)
         )
+
+        role_members = list(UserRole.__members__)
         users_count: int = await self.storage.Session.scalar(
-            select(count()).where(UserModel.role < user_role)
+            select(count()).where(
+                UserModel.role.cast(String).in_(
+                    role_members[: role_members.index(user_role.value)]
+                )
+            )
         )
         if not users_count:
             return await abort('На данный момент нет активных пользователей.')
@@ -129,7 +137,7 @@ class BotMessage(object):
             else:
                 text = str(user.id)
 
-            if user.role >= UserRole.SUPPORT:
+            if user.role in {UserRole.SUPPORT, UserRole.ADMIN}:
                 icon = '🛡️'
             elif user.is_subscribed:
                 icon = '✅'
@@ -256,18 +264,30 @@ class BotMessage(object):
                             SessionModel.phone_number
                             == ClientModel.phone_number
                         )
-                        .where(SessionModel.user_id.is_not(None)),
+                        .where(SessionModel.user_id.is_(chat_id)),
                     )
                     .order_by(ClientModel.created_at)
                 )
             ):
                 async with auto_init(self.get_worker(phone_number)) as worker:
                     with suppress(FloodWait):
-                        owner = await self.storage.Session.merge(
-                            await worker.initialize_user_service(
-                                owner, promote_users=self.username
+                        try:
+                            self.initialize_user_service
+                            owner = await self.storage.Session.merge(
+                                await worker.initialize_user_service(
+                                    owner, promote_users=self.username
+                                )
                             )
-                        )
+                        except PeerIdInvalid:
+                            if owner.service_id:
+                                await worker.leave_chat(owner.service_id)
+                            return await self.answer_edit_send(
+                                query_id,
+                                chat_id,
+                                message_id,
+                                text='У сервисного аккаунта нет доступа '
+                                'к боту.',
+                            )
                         await self.storage.Session.commit()
                         break
             else:
@@ -289,7 +309,10 @@ class BotMessage(object):
             self.storage.Session.add(bot)
             await self.storage.Session.commit()
 
-            if chat_id == bot.owner.id and bot.owner.role < UserRole.SUPPORT:
+            if chat_id == bot.owner.id and bot.owner.role not in {
+                UserRole.SUPPORT,
+                UserRole.ADMIN,
+            }:
 
                 def _query2(command: str, /) -> Query:
                     q = _query(command)
@@ -400,7 +423,7 @@ class BotMessage(object):
                             SessionModel.phone_number
                             == ClientModel.phone_number
                         )
-                        .where(SessionModel.user_id.is_not(None)),
+                        .where(SessionModel.user_id.is_(chat_id)),
                     )
                     .order_by(ClientModel.created_at)
                 )
@@ -449,8 +472,11 @@ class BotMessage(object):
             await self.storage.Session.commit()
 
         elif data.command == self.BOT.ROLE:
-            diff = 1 if bot.owner.role < UserRole.SUPPORT else -1
-            bot.owner.role = UserRole(bot.owner.role.value + diff)
+            roles = list(UserRole.__members__)
+            role_index = roles.index(bot.owner.role.value)
+            bot.owner.role = UserRole(
+                roles[role_index + 1 if role_index < len(roles) - 2 else 0]
+            )
             await self.storage.Session.commit()
 
         elif data.command == self.BOT.DELETE:
@@ -615,7 +641,9 @@ class BotMessage(object):
                             [
                                 IKB(
                                     'Повысить роль'
-                                    if bot.owner.role < UserRole.SUPPORT
+                                    if UserModel.role.cast(String).not_in(
+                                        {UserRole.SUPPORT, UserRole.ADMIN}
+                                    )
                                     else 'Понизить роль',
                                     _query(self.BOT.ROLE),
                                 ),
@@ -625,7 +653,10 @@ class BotMessage(object):
                             select(
                                 exists(text('NULL')).where(
                                     (UserModel.id == chat_id)
-                                    & (UserModel.role >= UserRole.ADMIN)
+                                    & (
+                                        UserModel.role.cast(String)
+                                        == UserRole.ADMIN.value
+                                    )
                                 )
                             )
                         )
@@ -642,7 +673,7 @@ class BotMessage(object):
                         ],
                     ]
                     if bot.owner.id != chat_id
-                    or bot.owner.role >= UserRole.SUPPORT
+                    or bot.owner.role in {UserRole.SUPPORT, UserRole.ADMIN}
                     else []
                 )
                 + (

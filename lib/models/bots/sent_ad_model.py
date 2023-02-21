@@ -1,19 +1,16 @@
 """The module that provides a `SentAdModel`."""
 
 from datetime import datetime
-from typing import Any, Dict, Final, Tuple, Union
+from typing import Final
 
+from sqlalchemy import CheckConstraint
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
-from sqlalchemy.sql.schema import (
-    Column,
-    ForeignKey,
-    ForeignKeyConstraint,
-    SchemaItem,
-)
-from sqlalchemy.sql.sqltypes import BigInteger, DateTime, Integer, String
+from sqlalchemy.sql.schema import Column, ForeignKey, ForeignKeyConstraint
+from sqlalchemy.sql.sqltypes import DateTime, String
 
-from ..base_interface import Base
+from ..base_interface import Base, TableArgs
 from ..clients.ad_model import AdModel
 from .chat_model import ChatModel
 
@@ -42,51 +39,41 @@ class SentAdModel(Base):
             The date and time the sent message with the ad was sent.
     """
 
-    ad_chat_id: Final[Column[int]] = Column(
-        'AdChatId',
-        BigInteger,
+    ad_chat_id: Final = Column(
+        AdModel.chat_id.type,
         nullable=False,
-        key='ad_chat_id',
     )
-    ad_message_id: Final[Column[int]] = Column(
-        'AdMessageId',
-        Integer,
+    ad_message_id: Final = Column(
+        AdModel.message_id.type,
         nullable=False,
-        key='ad_message_id',
     )
-    chat_id: Final[Column[int]] = Column(
-        'ChatId',
+    chat_id: Final = Column(
         ChatModel.id.type,
         ForeignKey(ChatModel.id, onupdate='CASCADE', ondelete='NO ACTION'),
         primary_key=True,
-        key='chat_id',
     )
     message_id: Final[Column[int]] = Column(
-        'MessageId',
-        Integer,
+        AdModel.message_id.type,
+        CheckConstraint('message_id > 0'),
         primary_key=True,
-        key='message_id',
     )
     link: Final[Column[str]] = Column(
-        'Link',
         String(255),
+        CheckConstraint("link <> ''"),
         nullable=False,
-        key='link',
     )
     timestamp: Final[Column[datetime]] = Column(
-        'Timestamp',
         DateTime(timezone=True),
         nullable=False,
-        key='timestamp',
     )
-    ad: Final['RelationshipProperty[AdModel]'] = relationship(
+    ad: Mapped['RelationshipProperty[AdModel]'] = relationship(
         'AdModel',
         back_populates='sent_ads',
         lazy='joined',
         cascade='save-update',
         uselist=False,
     )
-    chat: Final['RelationshipProperty[ChatModel]'] = relationship(
+    chat: Mapped['RelationshipProperty[ChatModel]'] = relationship(
         'ChatModel',
         back_populates='sent_ads',
         lazy='joined',
@@ -94,7 +81,7 @@ class SentAdModel(Base):
         uselist=False,
     )
 
-    __table_args__: Final[Tuple[Union[SchemaItem, Dict[str, Any]], ...]] = (
+    __table_args__: Final[TableArgs] = (
         ForeignKeyConstraint(
             [ad_chat_id, ad_message_id],
             [AdModel.chat_id, AdModel.message_id],

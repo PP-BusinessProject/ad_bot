@@ -13,6 +13,7 @@ from typing import (
     Final,
     Iterable,
     Optional,
+    Self,
     Type,
     TypeVar,
     Union,
@@ -20,7 +21,6 @@ from typing import (
 
 from sqlalchemy.sql.sqltypes import String
 from sqlalchemy.sql.type_api import TypeDecorator, TypeEngine
-from typing_extensions import Self
 
 #
 _T = TypeVar('_T')

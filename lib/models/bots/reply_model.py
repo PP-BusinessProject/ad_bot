@@ -3,7 +3,9 @@
 from datetime import datetime
 from typing import Final, Optional
 
+from sqlalchemy import CheckConstraint
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.schema import Column, ForeignKey
 from sqlalchemy.sql.sqltypes import (
@@ -22,8 +24,7 @@ from .client_model import ClientModel
 class ReplyModel(Base):
     """The model to store user replies to :class:`ClientModel`."""
 
-    client_phone_number: Final[Column[int]] = Column(
-        'ClientPhoneNumber',
+    client_phone_number: Final = Column(
         ClientModel.phone_number.type,
         ForeignKey(
             ClientModel.phone_number,
@@ -31,55 +32,43 @@ class ReplyModel(Base):
             ondelete='CASCADE',
         ),
         primary_key=True,
-        key='client_phone_number',
     )
     chat_id: Final[Column[int]] = Column(
-        'ChatId',
         BigInteger,
         primary_key=True,
-        key='chat_id',
     )
     message_id: Final[Column[int]] = Column(
-        'MessageId',
         Integer,
+        CheckConstraint('message_id > 0'),
         primary_key=True,
-        key='message_id',
     )
     replied: Final[Column[bool]] = Column(
-        'Replied',
         Boolean(create_constraint=True),
         nullable=False,
         default=False,
-        key='replied',
     )
     first_name: Final[Column[str]] = Column(
-        'FirstName',
         String(MAX_NAME_LENGTH),
+        CheckConstraint("first_name <> ''"),
         nullable=False,
-        key='first_name',
     )
     last_name: Final[Column[Optional[str]]] = Column(
-        'LastName',
         String(MAX_NAME_LENGTH),
-        key='last_name',
+        CheckConstraint("last_name <> ''"),
     )
     username: Final[Column[Optional[str]]] = Column(
-        'Username',
         String(MAX_USERNAME_LENGTH),
-        key='username',
+        CheckConstraint("username <> ''"),
     )
     phone_number: Final[Column[Optional[int]]] = Column(
-        'PhoneNumber',
         BigInteger,
-        key='phone_number',
+        CheckConstraint('phone_number > 0'),
     )
     timestamp: Final[Column[datetime]] = Column(
-        'Timestamp',
         DateTime(timezone=True),
         nullable=False,
-        key='timestamp',
     )
-    sender_client: Final['RelationshipProperty[ClientModel]'] = relationship(
+    sender_client: Mapped['RelationshipProperty[ClientModel]'] = relationship(
         'ClientModel',
         back_populates='user_replies',
         lazy='noload',

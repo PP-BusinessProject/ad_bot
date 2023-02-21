@@ -2,15 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Final, Optional, Type
+from typing import ClassVar, Final, Optional, Self, Type
 
 from pyrogram.client import Client
 from pyrogram.types import Message
+from sqlalchemy import CheckConstraint
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.schema import Column, ForeignKey
 from sqlalchemy.sql.sqltypes import Integer
-from typing_extensions import Self
 
 from ..base_interface import Base
 from .input_model import InputModel
@@ -19,8 +20,7 @@ from .input_model import InputModel
 class InputMessageModel(Base):
     """The used message to store in the database."""
 
-    chat_id: Final[Column[int]] = Column(
-        'ChatId',
+    chat_id: Final = Column(
         InputModel.chat_id.type,
         ForeignKey(
             InputModel.chat_id,
@@ -28,15 +28,13 @@ class InputMessageModel(Base):
             ondelete='CASCADE',
         ),
         primary_key=True,
-        key='chat_id',
     )
     message_id: Final[Column[int]] = Column(
-        'MessageId',
         Integer,
+        CheckConstraint('message_id > 0'),
         primary_key=True,
-        key='message_id',
     )
-    input: Final['RelationshipProperty[InputModel]'] = relationship(
+    input: Mapped['RelationshipProperty[InputModel]'] = relationship(
         'InputModel',
         back_populates='used_messages',
         lazy='noload',
@@ -44,7 +42,7 @@ class InputMessageModel(Base):
         order_by=message_id,
         uselist=False,
     )
-    _instance: Optional[Message] = None
+    _instance: ClassVar[Optional[Message]] = None
 
     @classmethod
     def from_message(

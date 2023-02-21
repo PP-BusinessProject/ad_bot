@@ -319,7 +319,7 @@ class ChatMessage(object):
                     message_id=message_id,
                     data=data,
                     on_response=self._update_chat_period,
-                    on_finished=self.sender_chat_message,
+                    on_finished=self.chat_message,
                     user_role=UserRole.SUPPORT,
                 )
             )

@@ -10,6 +10,7 @@ from typing import (
     Generator,
     Iterable,
     Optional,
+    Self,
     Union,
     overload,
 )
@@ -18,15 +19,14 @@ from pyrogram.errors.exceptions.bad_request_400 import (
     PeerIdInvalid,
     UserAlreadyParticipant,
 )
-from pyrogram.errors.exceptions.not_acceptable_406 import NotAcceptable
 from pyrogram.errors.exceptions.flood_420 import FloodWait
+from pyrogram.errors.exceptions.not_acceptable_406 import NotAcceptable
 from pyrogram.errors.rpc_error import RPCError
 from pyrogram.raw.types.input_peer_channel import InputPeerChannel
 from pyrogram.raw.types.input_peer_chat import InputPeerChat
 from pyrogram.raw.types.input_peer_user import InputPeerUser
 from pyrogram.raw.types.rpc_error import RpcError
 from pyrogram.types.user_and_chats.chat import Chat
-from typing_extensions import Self
 
 if TYPE_CHECKING:
     from ...ad_bot_client import AdBotClient
@@ -170,11 +170,12 @@ class CheckChats(object):
                 if not invite_link:
                     return None
                 try:
-                    if self.is_bot:
-                        raise UserAlreadyParticipant
-                    chat = await self.join_chat(invite_link)
-                except UserAlreadyParticipant:
-                    chat = await self.get_chat(invite_link)
+                    try:
+                        if self.is_bot:
+                            raise RPCError
+                        chat = await self.join_chat(invite_link)
+                    except UserAlreadyParticipant:
+                        chat = await self.get_chat(invite_link)
                 except FloodWait:
                     raise
                 except RPCError as _:

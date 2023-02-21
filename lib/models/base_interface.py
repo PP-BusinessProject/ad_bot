@@ -1,7 +1,5 @@
 """The SQLAlchemy base for :class:`AdBotClient` models."""
 
-from __future__ import annotations
-
 from contextlib import suppress
 from datetime import date, datetime, time, timedelta
 from decimal import Decimal
@@ -10,131 +8,56 @@ from re import findall
 from typing import (
     TYPE_CHECKING,
     Any,
+    Callable,
     ClassVar,
     Dict,
     Final,
     Iterable,
     List,
+    Self,
+    Tuple,
     Type,
-    TypeVar,
     Union,
-    overload,
 )
+from uuid import UUID
 
 from inflect import engine
-from simplejson import dumps
+from pydantic.main import BaseConfig, BaseModel, create_model
+from sqlalchemy.inspection import inspect
 from sqlalchemy.orm.decl_api import declarative_base, declared_attr
 from sqlalchemy.orm.properties import ColumnProperty
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.orm.state import InstanceState
-from sqlalchemy.sql.schema import Column
-from typing_extensions import Self
+from sqlalchemy.sql.schema import Column, SchemaItem
 
 #
+TableArgs = Tuple[Union[SchemaItem, Dict[str, Any]]]
+Policies = Dict[str, Dict[str, Union[bool, str, Tuple[str, ...]]]]
+Permissions = Dict[
+    Union[str, Tuple[str, ...]],
+    Dict[Union[str, Tuple[str, ...]], Tuple[Column, ...]],
+]
 Serializable = Union[
     Union[None, bool, int, float, Decimal, str],
     Union[List['Serializable'], Dict[str, 'Serializable']],
 ]
-_Serializable = TypeVar('_Serializable', bound=Serializable, covariant=True)
 
 
-@overload
-def serialize(
-    value: _Serializable,
-    /,
-    *,
-    encoding: str = 'utf8',
-) -> _Serializable:
-    pass
-
-
-@overload
-def serialize(
-    value: Union[bytes, date, time, datetime],
-    /,
-    *,
-    encoding: str = 'utf8',
-) -> str:
-    pass
-
-
-@overload
-def serialize(
-    value: timedelta,
-    /,
-    *,
-    encoding: str = 'utf8',
-) -> float:
-    pass
-
-
-@overload
-def serialize(
-    value: BaseInterface,
-    /,
-    *,
-    encoding: str = 'utf8',
-) -> Dict[str, Serializable]:
-    pass
-
-
-@overload
-def serialize(
-    value: Dict[str, _Serializable],
-    /,
-    *,
-    encoding: str = 'utf8',
-) -> Dict[str, _Serializable]:
-    pass
-
-
-@overload
-def serialize(
-    value: Iterable[_Serializable],
-    /,
-    *,
-    encoding: str = 'utf8',
-) -> List[_Serializable]:
-    pass
-
-
-@overload
-def serialize(value: Any, /, *, encoding: str = 'utf8') -> Serializable:
-    pass
-
-
-def serialize(value: Any, /, *, encoding: str = 'utf8') -> Serializable:
-    if isinstance(value, BaseInterface):
-        return serialize(value.dict)
-    elif isinstance(value, (type(None), bool, int, float, Decimal, str)):
-        return value
-    elif isinstance(value, bytes):
-        return value.decode(encoding)
-    elif isinstance(value, timedelta):
-        return value.total_seconds()
-    elif isinstance(value, (date, time, datetime)):
-        return value.isoformat()
-    elif isinstance(value, Enum):
-        return value.value
-    elif isinstance(value, dict):
-        return {serialize(k): serialize(v) for k, v in value.items()}
-    elif isinstance(value, Iterable):
-        return list(map(serialize, value))
-    else:
-        raise TypeError(f'Unserializable type "{type(value)}": {value}')
+class _OrmConfig(BaseConfig):
+    orm_mode: Final[bool] = True
 
 
 class BaseInterface(object):
     """The base class for all :module:`SQLAlchemy` models."""
 
     inflect: ClassVar[engine] = engine()
-    __mapper_args__: Final[dict[str, Any]] = dict(eager_defaults=True)
+    __mapper_args__: ClassVar[Dict[str, Any]] = dict(eager_defaults=True)
 
     @declared_attr
-    def __tablename__(cls: Type[Self], /) -> str:  # noqa: N805
-        words = findall(r'[A-Z][^A-Z]*', cls.__name__.removesuffix('Model'))
-        words.append(cls.inflect.plural(words.pop().lower()).capitalize())
-        return ''.join(words)
+    def __tablename__(cls: Type[Self], /) -> str:
+        words = findall(r'[A-Z]+[^A-Z]*', cls.__name__.removesuffix('Model'))
+        words.append(cls.inflect.plural(words.pop().lower()))
+        return '_'.join(word.lower() for word in words)
 
     @classmethod
     def from_other(cls: Type[Self], other: Any, /) -> Self:
@@ -161,8 +84,8 @@ class BaseInterface(object):
     @classmethod
     @property
     def columns(cls: Type[Self], /) -> Iterable[Column]:
-        if hasattr(cls, '__table__'):
-            return cls.__table__.columns
+        if hasattr(cls, '__mapper__'):
+            return cls.__mapper__.columns
         elif not hasattr(cls, '_columns'):
             cls._columns = [
                 column.fget(cls)
@@ -206,7 +129,7 @@ class BaseInterface(object):
     def relationship_types(
         cls: Type[Self],
         /,
-    ) -> Dict[RelationshipProperty, Type[BaseInterface]]:
+    ) -> Dict[RelationshipProperty, Type[Self]]:
         relationship_types: Dict[Column, Type[Any]] = {}
         for relationship in cls.relationships:
             if getattr(getattr(relationship, 'entity', None), 'class_', None):
@@ -222,8 +145,8 @@ class BaseInterface(object):
 
     @property
     def dict(self: Self, /) -> Dict[str, Any]:
-        return {_.key: getattr(self, _.key, None) for _ in self.columns} | {
-            _.key: getattr(self, _.key, None) for _ in self.relationships
+        return {_.key: self.__dict__.get(_.key) for _ in self.columns} | {
+            _.key: self.__dict__.get(_.key) for _ in self.relationships
         }
 
     @property
@@ -231,13 +154,7 @@ class BaseInterface(object):
         return serialize(self)
 
     def __str__(self: Self, /) -> str:
-        return dumps(
-            self.json,
-            skipkeys=False,
-            check_circular=False,
-            separators=(',', ':'),
-            namedtuple_as_object=False,
-        )
+        return str(self.json)
 
     def __repr__(self: Self, /) -> str:
         return f'{self.__class__.__name__}(%s)' % ', '.join(
@@ -245,6 +162,76 @@ class BaseInterface(object):
             for key, value in self.json.items()
             if value is not None
         )
+
+    @classmethod
+    @property
+    def pydantic(cls: Type[Self], /) -> Type[BaseModel]:
+        if not hasattr(cls, '_pydantic'):
+            cls._pydantic = create_model(
+                f'Pydantic{cls.__name__}',
+                __config__=_OrmConfig,
+                **{
+                    column.key: (
+                        type,
+                        ...
+                        if column.default is None
+                        and (not column.nullable or not column.autoincrement)
+                        else None,
+                    )
+                    for column, type in cls.columns_types.items()
+                },
+            )
+        return cls._pydantic
+
+    def to_pydantic(self: Self, /) -> BaseModel:
+        return self.__class__.pydantic(**self.dict)
+
+
+def serialize(
+    value: Any,
+    /,
+    checked: Iterable[BaseInterface] = (),
+    *,
+    encoding: str = 'utf8',
+) -> Serializable:
+    if isinstance(value, BaseInterface):
+        state: InstanceState = inspect(value)
+        serialized = {_.key: state.dict.get(_.key) for _ in value.columns}
+        for relationship in value.relationships:
+            _def = [] if relationship.uselist else None
+            if (_value := state.dict.get(relationship.key, _def)) in checked:
+                _value = None
+            elif isinstance(_value, list):
+                for checked_model in checked:
+                    while checked_model in _value:
+                        _value.remove(checked_model)
+            serialized[relationship.key] = _value
+        return serialize(serialized, (*checked, value))
+    elif isinstance(value, (type(None), bool, int, float, str)):
+        return value
+    elif isinstance(value, Decimal):
+        return float(value)
+    elif isinstance(value, UUID):
+        return str(value)
+    elif isinstance(value, bytes):
+        return value.decode(encoding)
+    elif isinstance(value, timedelta):
+        return value.total_seconds()
+    elif isinstance(value, (date, time, datetime)):
+        return value.isoformat()
+    elif isinstance(value, Enum):
+        return value.value
+    elif isinstance(value, Callable):
+        return f'{value.__module__}.{value.__name__}'
+    elif isinstance(value, dict):
+        return {
+            serialize(k, checked): serialize(v, checked)
+            for k, v in value.items()
+        }
+    elif isinstance(value, Iterable):
+        return [serialize(_, checked) for _ in value]
+    else:
+        raise TypeError(f'Unserializable type "{type(value)}": {value}')
 
 
 if TYPE_CHECKING:

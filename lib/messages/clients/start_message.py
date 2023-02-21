@@ -78,7 +78,7 @@ class StartMessage(object):
                     if user_first is None
                     else 'Приветствуем в Advertisment Bot!',
                     '',
-                    f'**Ваша роль:** {user.role.name.capitalize()}'
+                    f'**Ваша роль:** {user.role.translation.capitalize()}'
                     if user.is_subscribed
                     else None,
                     subscription_text(user),
@@ -108,7 +108,7 @@ class StartMessage(object):
                         IKB('Список чатов', self.SENDER_CHAT.LIST),
                     ],
                 ]
-                if user.role in (UserRole.SUPPORT, UserRole.ADMIN)
+                if user.role in {UserRole.SUPPORT, UserRole.ADMIN}
                 else [
                     [IKB('Мои боты', self.BOT.PAGE)],
                     [IKB('Связаться с администрацией', self.HELP._SELF)],
@@ -154,16 +154,14 @@ class StartMessage(object):
                 user, notify_subscription_end
             )
 
-            # if not user.is_subscribed:
-            #     handlers_whitelist = set[str]()
-            # el
-            if user.role <= UserRole.USER and prev_user.role > UserRole.USER:
+            sup_roles = {UserRole.SUPPORT, UserRole.ADMIN}
+            if user.role not in sup_roles and prev_user.role in sup_roles:
                 handlers_whitelist = {
                     handler.callback_name
                     for group in self.groups.values()
                     for handler in group
                     if handler.check_user is None
-                    or handler.check_user <= UserRole.USER
+                    or handler.check_user not in sup_roles
                 }
             else:
                 return

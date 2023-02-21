@@ -1,13 +1,36 @@
 """Custom column types for the mapped classes."""
 
+from enum import Enum
 from importlib import import_module
-from inspect import isfunction
 from types import ModuleType
-from typing import Any, Callable, Optional, Type, Union
+from typing import Any, Callable, Optional, Self, Type, Union
 
-from sqlalchemy.sql.sqltypes import String
+from sqlalchemy.sql.sqltypes import SmallInteger, String
 from sqlalchemy.sql.type_api import TypeDecorator, TypeEngine
-from typing_extensions import Self
+
+
+class IntEnum(TypeDecorator):
+    impl = SmallInteger
+
+    def __init__(self: Self, enumtype: Type[Enum], /, *args, **kwargs) -> None:
+        super().__init__(*args, **kwargs)
+        self._enumtype = enumtype
+
+    def process_bind_param(
+        self: Self,
+        value: Any,
+        /,
+        dialect: Any = None,
+    ):
+        return value.value
+
+    def process_result_value(
+        self: Self,
+        value: Any,
+        /,
+        dialect: Any = None,
+    ):
+        return self._enumtype(value)
 
 
 class LocalFunction(TypeDecorator):

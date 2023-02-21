@@ -4,6 +4,7 @@ from typing import (
     AsyncGenerator,
     Iterable,
     Optional,
+    Self,
     Union,
     overload,
 )
@@ -12,7 +13,6 @@ from pyrogram.errors.exceptions.bad_request_400 import UserNotParticipant
 from pyrogram.raw.functions.channels.get_participant import GetParticipant
 from pyrogram.raw.types.input_channel import InputChannel
 from pyrogram.raw.types.input_peer_channel import InputPeerChannel
-from typing_extensions import Self
 
 from ...typings.get_channel_participants import ChannelParticipantType
 

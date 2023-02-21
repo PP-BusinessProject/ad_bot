@@ -1,6 +1,6 @@
 """The module with the :meth:`AdBotClient.set_privacy`."""
 
-from typing import TYPE_CHECKING, Iterable, Optional, Union, overload
+from typing import TYPE_CHECKING, Iterable, Optional, Self, Union, overload
 
 from pyrogram.raw.functions.account.set_privacy import (
     SetPrivacy as RawSetPrivacy,
@@ -34,7 +34,6 @@ from pyrogram.raw.types.input_privacy_value_disallow_users import (
 )
 from pyrogram.raw.types.input_user import InputUser
 from pyrogram.raw.types.input_user_self import InputUserSelf
-from typing_extensions import Self
 
 from ...typings.privacy_rules import (
     InputPrivacyKey,

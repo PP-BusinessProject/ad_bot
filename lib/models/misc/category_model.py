@@ -1,8 +1,8 @@
-from typing import TYPE_CHECKING, Final, Optional
+from typing import TYPE_CHECKING, Final, List, Optional
 
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
-from sqlalchemy.sql.expression import literal_column
 from sqlalchemy.sql.schema import CheckConstraint, Column, ForeignKey
 from sqlalchemy.sql.sqltypes import Integer, String
 
@@ -15,42 +15,36 @@ if TYPE_CHECKING:
 
 class CategoryModel(Base):
     id: Final[Column[int]] = Column(
-        'Id',
         Integer,
         primary_key=True,
         autoincrement=True,
-        key='id',
     )
     parent_id: Final[Column[Optional[int]]] = Column(
-        'ParentId',
         id.type,
         ForeignKey(id, onupdate='CASCADE', ondelete='CASCADE'),
-        key='parent_id',
     )
     name: Final[Column[str]] = Column(
-        'Name',
         String(255),
-        CheckConstraint(literal_column('"Name"') != literal_column('\'\'')),
+        CheckConstraint("name <> ''"),
         nullable=False,
         unique=True,
-        key='name',
     )
 
-    ads: Final['RelationshipProperty[list[AdModel]]'] = relationship(
+    ads: Mapped['RelationshipProperty[List[AdModel]]'] = relationship(
         'AdModel',
         back_populates='category',
         lazy='noload',
         cascade='save-update, merge, expunge, delete, delete-orphan',
         uselist=True,
     )
-    chats: Final['RelationshipProperty[list[ChatModel]]'] = relationship(
+    chats: Mapped['RelationshipProperty[List[ChatModel]]'] = relationship(
         'ChatModel',
         back_populates='category',
         lazy='noload',
         cascade='save-update, merge, expunge, delete, delete-orphan',
         uselist=True,
     )
-    parent: Final[
+    parent: Mapped[
         'RelationshipProperty[Optional[CategoryModel]]'
     ] = relationship(
         'CategoryModel',
@@ -61,8 +55,8 @@ class CategoryModel(Base):
         cascade='save-update',
         uselist=False,
     )
-    children: Final[
-        'RelationshipProperty[list[CategoryModel]]'
+    children: Mapped[
+        'RelationshipProperty[List[CategoryModel]]'
     ] = relationship(
         'CategoryModel',
         back_populates='parent',

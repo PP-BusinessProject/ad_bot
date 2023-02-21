@@ -1,4 +1,4 @@
-from typing import Iterable, Optional, Union, overload
+from typing import TYPE_CHECKING, Iterable, Optional, Self, Union, overload
 
 from pyrogram.raw.functions.messages.get_peer_dialogs import (
     GetPeerDialogs as RawGetPeerDialogs,
@@ -10,9 +10,6 @@ from pyrogram.types.messages_and_media.message import Message
 from pyrogram.types.user_and_chats.chat import Chat
 from pyrogram.types.user_and_chats.dialog import Dialog
 from pyrogram.utils import get_peer_id
-from typing_extensions import Self
-
-from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
     from ...ad_bot_client import AdBotClient

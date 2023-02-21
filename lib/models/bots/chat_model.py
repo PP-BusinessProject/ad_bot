@@ -2,7 +2,7 @@
 
 from datetime import timedelta
 from enum import IntEnum, auto
-from typing import TYPE_CHECKING, Final, Optional, Type
+from typing import TYPE_CHECKING, Final, List, Optional, Self, Type
 
 from pyrogram.errors.exceptions.bad_request_400 import (
     ChannelBanned,
@@ -14,14 +14,16 @@ from pyrogram.errors.exceptions.bad_request_400 import (
 )
 from pyrogram.errors.exceptions.flood_420 import SlowmodeWait
 from pyrogram.errors.exceptions.forbidden_403 import ChatWriteForbidden
+from sqlalchemy import CheckConstraint
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.expression import ClauseElement
 from sqlalchemy.sql.schema import Column, ForeignKey
 from sqlalchemy.sql.sqltypes import BigInteger, Boolean, Enum, Interval, String
-from typing_extensions import Self
 
+from .._constraints import MAX_USERNAME_LENGTH
 from .._mixins import Timestamped
 from ..base_interface import Base
 from ..misc.category_model import CategoryModel
@@ -104,60 +106,46 @@ class ChatModel(Timestamped, Base):
     """
 
     id: Final[Column[int]] = Column(
-        'Id',
         BigInteger,
         primary_key=True,
-        key='id',
     )
     title: Final[Column[str]] = Column(
-        'Title',
-        String,
+        String(255),
+        CheckConstraint("title <> ''"),
         nullable=False,
-        key='title',
     )
     description: Final[Column[Optional[str]]] = Column(
-        'Description',
-        String,
-        key='description',
+        String(1023),
+        CheckConstraint("description <> ''"),
     )
     username: Final[Column[Optional[str]]] = Column(
-        'Username',
-        String,
+        String(MAX_USERNAME_LENGTH),
+        CheckConstraint("username <> ''"),
         unique=True,
-        key='username',
     )
     invite_link: Final[Column[Optional[str]]] = Column(
-        'InviteLink',
-        String,
+        String(1023),
+        CheckConstraint("invite_link <> ''"),
         unique=True,
-        key='invite_link',
     )
     category_id: Final[Column[Optional[int]]] = Column(
-        'CategoryId',
         CategoryModel.id.type,
         ForeignKey(CategoryModel.id, onupdate='CASCADE', ondelete='SET NULL'),
-        key='category_id',
     )
     period: Final[Column[timedelta]] = Column(
-        'Period',
         Interval(second_precision=True),
         nullable=False,
         default=timedelta(minutes=20),
-        key='period',
     )
     active: Final[Column[bool]] = Column(
-        'Active',
         Boolean(create_constraint=True),
         nullable=False,
         default=True,
-        key='active',
     )
     deactivated_cause: Final[Column[Optional[ChatDeactivatedCause]]] = Column(
-        'DeactivatedCause',
         Enum(ChatDeactivatedCause),
-        key='deactivated_cause',
     )
-    category: Final[
+    category: Mapped[
         'RelationshipProperty[Optional[CategoryModel]]'
     ] = relationship(
         'CategoryModel',
@@ -166,7 +154,7 @@ class ChatModel(Timestamped, Base):
         cascade='save-update',
         uselist=False,
     )
-    sent_ads: Final['RelationshipProperty[list[SentAdModel]]'] = relationship(
+    sent_ads: Mapped['RelationshipProperty[List[SentAdModel]]'] = relationship(
         'SentAdModel',
         back_populates='chat',
         lazy='noload',

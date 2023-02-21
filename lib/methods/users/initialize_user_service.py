@@ -94,65 +94,65 @@ class InitializeUserService(object):
                 user.service_id
             )
 
-        # promoted_participants: set[int] = set()
-        # demote_admins: list[ChannelParticipantAdmin] = []
-        # if promote_user_ids and not freshly_created:
-        #     admin: ChannelParticipantAdmin
-        #     async for admin in self.iter_channel_participants(
-        #         user.service_id, 'admins'
-        #     ):
-        #         if admin.user_id in promote_user_ids:
-        #             promoted_participants.add(admin.user_id)
-        #         elif isinstance(admin, ChannelParticipantAdmin) and (
-        #             not admin.is_self and demote_users
-        #         ):
-        #             demote_admins.append(admin)
+        promoted_participants: set[int] = set()
+        demote_admins: list[ChannelParticipantAdmin] = []
+        if promote_user_ids and not freshly_created:
+            admin: ChannelParticipantAdmin
+            async for admin in self.iter_channel_participants(
+                user.service_id, 'admins'
+            ):
+                if admin.user_id in promote_user_ids:
+                    promoted_participants.add(admin.user_id)
+                elif isinstance(admin, ChannelParticipantAdmin) and (
+                    not admin.is_self and demote_users
+                ):
+                    demote_admins.append(admin)
 
-        # demoted_admins: set[int] = set()
-        # for promote_id in promote_user_ids:
-        #     if promote_id in promoted_participants:
-        #         continue
-        #     while True:
-        #         try:
-        #             await self.promote_chat_member(
-        #                 user.service_id,
-        #                 promote_user_ids[promote_id],
-        #                 privileges=ChatPrivileges(
-        #                     can_manage_chat=True,
-        #                     can_delete_messages=True,
-        #                     can_restrict_members=True,
-        #                     can_promote_members=True,
-        #                     can_change_info=True,
-        #                     can_post_messages=True,
-        #                     can_edit_messages=True,
-        #                     can_invite_users=True,
-        #                     is_anonymous=False,
-        #                 ),
-        #             )
-        #         except AdminsTooMuch:
-        #             for admin in demote_admins:
-        #                 if admin.user_id not in demoted_admins:
-        #                     demoted_admins.add(admin.user_id)
-        #                     with suppress(RPCError):
-        #                         await self.promote_chat_member(
-        #                             user.service_id,
-        #                             admin.user_id,
-        #                             privileges=ChatPrivileges(
-        #                                 can_manage_chat=True,
-        #                                 can_delete_messages=True,
-        #                                 can_restrict_members=True,
-        #                                 can_promote_members=True,
-        #                                 can_change_info=True,
-        #                                 can_post_messages=True,
-        #                                 can_edit_messages=True,
-        #                                 can_invite_users=True,
-        #                                 is_anonymous=False,
-        #                             ),
-        #                         )
-        #                         break
-        #             else:
-        #                 raise
-        #         else:
-        #             break
+        demoted_admins: set[int] = set()
+        for promote_id in promote_user_ids:
+            if promote_id in promoted_participants:
+                continue
+            while True:
+                try:
+                    await self.promote_chat_member(
+                        user.service_id,
+                        promote_user_ids[promote_id],
+                        privileges=ChatPrivileges(
+                            can_manage_chat=True,
+                            can_delete_messages=True,
+                            can_restrict_members=True,
+                            can_promote_members=True,
+                            can_change_info=True,
+                            can_post_messages=True,
+                            can_edit_messages=True,
+                            can_invite_users=True,
+                            is_anonymous=False,
+                        ),
+                    )
+                except AdminsTooMuch:
+                    for admin in demote_admins:
+                        if admin.user_id not in demoted_admins:
+                            demoted_admins.add(admin.user_id)
+                            with suppress(RPCError):
+                                await self.promote_chat_member(
+                                    user.service_id,
+                                    admin.user_id,
+                                    privileges=ChatPrivileges(
+                                        can_manage_chat=True,
+                                        can_delete_messages=True,
+                                        can_restrict_members=True,
+                                        can_promote_members=True,
+                                        can_change_info=True,
+                                        can_post_messages=True,
+                                        can_edit_messages=True,
+                                        can_invite_users=True,
+                                        is_anonymous=False,
+                                    ),
+                                )
+                                break
+                    else:
+                        raise
+                else:
+                    break
 
         return user

@@ -17,7 +17,6 @@ from sqlalchemy.sql.expression import exists, select, text
 
 from ...models.bots.client_model import ClientModel
 from ...models.clients.user_model import UserModel
-from ...models.misc.input_message_model import InputMessageModel
 from ...models.misc.input_model import InputModel
 from ...models.misc.subscription_model import SubscriptionModel
 from ...models.sessions.session_model import SessionModel
@@ -121,7 +120,7 @@ class ServiceSubscription(object):
                             SessionModel.phone_number
                             == ClientModel.phone_number
                         )
-                        .where(SessionModel.user_id.is_not(None)),
+                        .where(SessionModel.user_id.is_(chat_id)),
                     )
                     .order_by(ClientModel.created_at)
                 )
@@ -257,11 +256,14 @@ class ServiceSubscription(object):
                         else [
                             [
                                 IKB(
-                                    name,
-                                    _query(self.SUBSCRIPTION.PICK, period),
+                                    subscription.name,
+                                    _query(
+                                        self.SUBSCRIPTION.PICK,
+                                        subscription.period,
+                                    ),
                                 )
                             ]
-                            async for period, name in (
+                            async for subscription in (
                                 await self.storage.Session.stream_scalars(
                                     select(SubscriptionModel)
                                 )

@@ -13,6 +13,7 @@ from typing import (
     Generic,
     Iterable,
     Optional,
+    Self,
     TypeVar,
     Union,
 )
@@ -24,7 +25,7 @@ from pyrogram.handlers.handler import Handler
 from pyrogram.raw.functions.messages.read_history import ReadHistory
 from pyrogram.types.messages_and_media.message import Message
 from sqlalchemy.sql.expression import exists, select, text
-from typing_extensions import Self
+from sqlalchemy.sql.sqltypes import String
 
 from .models.clients.user_model import UserModel, UserRole
 from .models.misc.input_model import InputModel
@@ -77,6 +78,8 @@ class AdBotHandler(Generic[T], Handler):
         super().__init__(callback)
         if not isinstance(pattern, str) and isinstance(pattern, Iterable):
             pattern = '|'.join(map(format_str, unpack(pattern)))
+        elif isinstance(pattern, Enum):
+            pattern = format_str(pattern.value)
         elif pattern:
             pattern = format_str(pattern)
         else:
@@ -158,8 +161,15 @@ class AdBotHandler(Generic[T], Handler):
                     .where(UserModel.id == chat_id)
                     .where(
                         UserModel.is_subscribed
-                        if self.check_user <= UserRole.USER
-                        else (UserModel.role >= self.check_user)
+                        if self.check_user
+                        not in {UserRole.SUPPORT, UserRole.ADMIN}
+                        else UserModel.role.cast(String).in_(
+                            list(UserRole.__members__)[
+                                list(UserRole.__members__).index(
+                                    self.check_user.value
+                                ) :
+                            ]
+                        )
                     )
                 )
             )
@@ -175,7 +185,7 @@ class AdBotHandler(Generic[T], Handler):
                 *(query_id, chat_id),
                 text='Для того чтобы пользоваться функционалом '
                 'оформите подписку.'
-                if self.check_user <= UserRole.USER
+                if self.check_user not in {UserRole.SUPPORT, UserRole.ADMIN}
                 else 'У вас недостаточно прав для выполнения этой функции.',
             )
             return await client.storage.Session.remove()

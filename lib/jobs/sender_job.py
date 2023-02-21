@@ -11,12 +11,12 @@ from pyrogram.errors import (
     ChannelBanned,
     ChannelPrivate,
     ChatAdminRequired,
+    ChatRestricted,
     ChatWriteForbidden,
     FloodWait,
     PeerIdInvalid,
     SlowmodeWait,
     Unauthorized,
-    ChatRestricted,
 )
 from pyrogram.errors.exceptions.bad_request_400 import (
     MessageIdInvalid,
@@ -27,7 +27,6 @@ from pyrogram.types.user_and_chats.chat import Chat
 from sqlalchemy.exc import IntegrityError, MissingGreenlet
 from sqlalchemy.future import select
 from sqlalchemy.orm import contains_eager, noload, with_parent
-from sqlalchemy.orm.util import aliased
 from sqlalchemy.sql.expression import exists, nullsfirst, or_, text, update
 from sqlalchemy.sql.functions import max as sql_max
 from sqlalchemy.sql.functions import now
@@ -173,7 +172,7 @@ class SenderJob(object):
             ad: AdModel
             last_ad_chat_id: Optional[int]
             checked_empty_categories: set[int] = set()
-            sent_ads_subquery = aliased(
+            sent_ads_subquery = (
                 select(
                     SentAdModel.ad_chat_id,
                     SentAdModel.ad_message_id,
@@ -187,6 +186,7 @@ class SenderJob(object):
                 )
                 .order_by(sql_max(SentAdModel.timestamp))
                 .subquery()
+                .alias()
             )
             async for ad, last_ad_chat_id in await self.storage.Session.stream(
                 select(AdModel, sent_ads_subquery.c.chat_id)
@@ -199,7 +199,7 @@ class SenderJob(object):
                     continue
 
                 _chat: Optional[Chat] = None
-                sent_ad_chats_subquery = aliased(
+                sent_ad_chats_subquery = (
                     select(
                         SentAdModel.chat_id,
                         sql_max(SentAdModel.timestamp).label('Timestamp'),
@@ -208,6 +208,7 @@ class SenderJob(object):
                     .group_by(SentAdModel.chat_id)
                     .order_by(sql_max(SentAdModel.timestamp))
                     .subquery()
+                    .alias()
                 )
                 async for chat in await self.storage.Session.stream_scalars(
                     select(ChatModel)

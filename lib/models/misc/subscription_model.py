@@ -1,7 +1,9 @@
 from datetime import timedelta
-from typing import TYPE_CHECKING, Final
+from typing import TYPE_CHECKING, Final, List
 
+from sqlalchemy import CheckConstraint
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.schema import Column
 from sqlalchemy.sql.sqltypes import Interval, String
@@ -14,19 +16,17 @@ if TYPE_CHECKING:
 
 class SubscriptionModel(Base):
     period: Final[Column[timedelta]] = Column(
-        'Period',
-        Interval(second_precision=True),
+        Interval(second_precision=0),
+        CheckConstraint("period > INTERVAL '0 days'"),
         primary_key=True,
-        key='period',
     )
     name: Final[Column[str]] = Column(
-        'Name',
         String(255),
+        CheckConstraint("name <> ''"),
         nullable=False,
-        key='name',
     )
 
-    users: Final['RelationshipProperty[list[UserModel]]'] = relationship(
+    users: Mapped['RelationshipProperty[List[UserModel]]'] = relationship(
         'UserModel',
         back_populates='subscription',
         lazy='noload',

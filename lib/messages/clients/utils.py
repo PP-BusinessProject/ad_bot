@@ -48,7 +48,7 @@ def message_header(
     def whose(user: UserModel, /) -> str:
         return '([{role}](tg://user?id={id}))'.format(
             id=user.id,
-            role=client.morph.inflect(user.role.name, case='gent'),
+            role=client.morph.inflect(user.role.translation, case='gent'),
         )
 
     def confirmed(user: UserModel, /) -> str:

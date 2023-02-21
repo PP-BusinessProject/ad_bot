@@ -237,7 +237,6 @@ class ClientMessage(object):
                 word = self.morph.plural(len(chat_ids), 'чат', case='gent')
                 return await abort(
                     f'Прогрето {valid} из {len(chat_ids)} {word}.'
-
                 )
 
         elif data.command == self.SENDER_CLIENT.DELETE:

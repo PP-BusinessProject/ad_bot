@@ -1,10 +1,21 @@
-from asyncio import AbstractEventLoop, Lock, Task, get_event_loop
+from asyncio import AbstractEventLoop, Lock, Semaphore, Task, get_event_loop
 from concurrent.futures import Executor, ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
+from http import client
 from logging import Logger, getLogger
 from pathlib import Path
-from typing import Any, Callable, ClassVar, Dict, Final, List, Optional, Type
+from typing import (
+    Any,
+    Callable,
+    ClassVar,
+    Dict,
+    Final,
+    List,
+    Optional,
+    Self,
+    Type,
+)
 
 from apscheduler.schedulers import (
     SchedulerAlreadyRunningError,
@@ -19,7 +30,7 @@ from pyrogram.session.session import Session
 from sqlalchemy.event.api import listen, remove
 from sqlalchemy.sql.expression import select
 from sqlalchemy.sql.functions import now
-from typing_extensions import Self
+from sqlalchemy.sql.sqltypes import String
 
 from .ad_bot_handler import AdBotHandler
 from .ad_bot_session import AdBotSession
@@ -38,7 +49,6 @@ from .utils.sqlalchemy_pg_compiler_patch import PGCompiler  # noqa: F401
 
 @dataclass(init=False)
 class AdBotClient(Commands, Jobs, Messages, Methods, Client):
-
     loop: Final[AbstractEventLoop]
     storage: Final[SQLAlchemyStorage]
     scheduler: Final[AsyncIOScheduler]
@@ -75,6 +85,8 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
     session: Final[AdBotSession]
     media_sessions: Final[dict]
     media_sessions_lock: Final[Lock]
+    save_file_semaphore: Final[Semaphore]
+    get_file_semaphore: Final[Semaphore]
     is_connected: Optional[bool]
     is_initialized: Optional[bool]
     takeout_id: Optional[int]
@@ -111,6 +123,7 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
         plugins: Optional[dict] = None,
         parse_mode: ParseMode = ParseMode.DEFAULT,
         sleep_threshold: int = Session.SLEEP_THRESHOLD,
+        max_concurrent_transmissions: int = Client.MAX_CONCURRENT_TRANSMISSIONS,
         executor: Optional[Executor] = None,
         *,
         ipv6: bool = False,
@@ -145,6 +158,9 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
         object.__setattr__(self, 'sleep_threshold', sleep_threshold)
         object.__setattr__(self, 'hide_password', True)
         object.__setattr__(
+            self, 'max_concurrent_transmissions', max_concurrent_transmissions
+        )
+        object.__setattr__(
             self,
             'executor',
             executor
@@ -162,6 +178,16 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
         object.__setattr__(self, 'listeners', {})
         object.__setattr__(self, 'media_sessions', {})
         object.__setattr__(self, 'media_sessions_lock', Lock())
+        object.__setattr__(
+            self,
+            'save_file_semaphore',
+            Semaphore(self.max_concurrent_transmissions),
+        )
+        object.__setattr__(
+            self,
+            'get_file_semaphore',
+            Semaphore(self.max_concurrent_transmissions),
+        )
         object.__setattr__(self, 'is_connected', None)
         object.__setattr__(self, 'is_initialized', None)
         object.__setattr__(self, 'takeout_id', None)
@@ -301,7 +327,9 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
 
         async for user in await self.storage.Session.stream_scalars(
             select(UserModel).filter(
-                UserModel.role <= UserRole.USER,
+                UserModel.role.cast(String).not_in(
+                    {UserRole.SUPPORT, UserRole.ADMIN}
+                ),
                 UserModel.subscription_from.is_not(None),
                 UserModel.subscription_period.is_not(None),
                 UserModel.subscription_from

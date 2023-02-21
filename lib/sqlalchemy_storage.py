@@ -15,6 +15,7 @@ from typing import (
     Final,
     Optional,
     ParamSpec,
+    Self,
     Tuple,
     Type,
     TypeVar,
@@ -39,9 +40,7 @@ from sqlalchemy.orm.session import Session as SyncSession
 from sqlalchemy.orm.session import sessionmaker
 from sqlalchemy.sql.expression import delete, exists, select
 from sqlalchemy.sql.schema import Column, MetaData
-from typing_extensions import _SpecialForm, Self
 
-from .ad_bot_auth import AdBotAuth
 from .models.misc.settings_model import SettingsModel
 from .models.sessions.peer_model import PeerModel
 from .models.sessions.session_model import SessionModel

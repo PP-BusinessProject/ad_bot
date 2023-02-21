@@ -82,10 +82,7 @@ class GetProfileSettings(object):
             # if bot.avatar_message_id is not None:
             #     await self.delete_service_avatar(bot)
             if await self.check_chats(
-                (
-                    bot.owner.service_id,
-                    bot.owner.service_invite,
-                )
+                (bot.owner.service_id, bot.owner.service_invite)
             ):
                 avatar_message = await self.send_cached_media(
                     bot.owner.service_id,
@@ -93,14 +90,10 @@ class GetProfileSettings(object):
                 )
                 bot.avatar_message_id = avatar_message.id
 
-        else:
-            if await self.check_chats(
-                (
-                    bot.owner.service_id,
-                    bot.owner.service_invite,
-                )
-            ):
-                avatar_messages = await self.send_media_group(
-                    bot.owner.service_id, avatars
-                )
-                bot.avatar_message_id = avatar_messages[0].id
+        elif await self.check_chats(
+            (bot.owner.service_id, bot.owner.service_invite)
+        ):
+            avatar_messages = await self.send_media_group(
+                bot.owner.service_id, avatars
+            )
+            bot.avatar_message_id = avatar_messages[0].id

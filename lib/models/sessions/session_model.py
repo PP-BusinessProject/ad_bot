@@ -1,8 +1,10 @@
 """The module that provides a Pyrogram :class:`SessionModel`."""
 
-from typing import TYPE_CHECKING, Final, Optional
+from typing import TYPE_CHECKING, Final, List, Optional
 
+from sqlalchemy import CheckConstraint
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.schema import Column
 from sqlalchemy.sql.sqltypes import (
@@ -24,49 +26,37 @@ class SessionModel(Timestamped, Base):
     """The model of a Pyrogram session."""
 
     phone_number: Final[Column[int]] = Column(
-        'PhoneNumber',
         BigInteger,
+        CheckConstraint('phone_number >= 0'),
         primary_key=True,
         default=0,
-        key='phone_number',
     )
     dc_id: Final[Column[int]] = Column(
-        'DcId',
         SmallInteger,
+        CheckConstraint('dc_id > 0'),
         nullable=False,
         default=2,
-        key='dc_id',
     )
     api_id: Final[Column[int]] = Column(
-        'ApiId',
         Integer,
+        CheckConstraint('api_id > 0'),
         nullable=False,
-        key='api_id',
     )
     test_mode: Final[Column[bool]] = Column(
-        'TestMode',
         Boolean(create_constraint=True),
         nullable=False,
         default=False,
-        key='test_mode',
     )
-    auth_key: Final[Column[Optional[bytes]]] = Column(
-        'AuthKey',
-        LargeBinary,
-        key='auth_key',
-    )
+    auth_key: Final[Column[Optional[bytes]]] = Column(LargeBinary)
     user_id: Final[Column[Optional[int]]] = Column(
-        'UserId',
         BigInteger,
+        CheckConstraint('user_id > 0'),
         unique=True,
-        key='user_id',
     )
     is_bot: Final[Column[Optional[int]]] = Column(
-        'IsBot',
         Boolean(create_constraint=True),
-        key='is_bot',
     )
-    peers: Final['RelationshipProperty[list[PeerModel]]'] = relationship(
+    peers: Mapped['RelationshipProperty[List[PeerModel]]'] = relationship(
         'PeerModel',
         back_populates='session',
         lazy='noload',

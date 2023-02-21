@@ -16,6 +16,7 @@ from pyrogram.types import InputMediaPhoto, Message
 from pyrogram.utils import get_channel_id
 from sqlalchemy.sql.expression import exists, select
 from sqlalchemy.sql.expression import text as sql_text
+from sqlalchemy.sql.sqltypes import String
 
 from ...models._constraints import (
     MAX_ABOUT_LENGTH,
@@ -851,12 +852,19 @@ class SettingsMessage(object):
                 select(
                     exists(sql_text('NULL')).where(
                         (UserModel.id == chat_id)
-                        & (UserModel.role >= UserRole.SUPPORT)
+                        & (
+                            UserModel.role.cast(String).in_(
+                                {UserRole.SUPPORT, UserRole.ADMIN}
+                            )
+                        )
                     )
                 )
             )
         else:
-            user_confirmed = bot.owner.role >= UserRole.SUPPORT
+            user_confirmed = bot.owner.role in {
+                UserRole.SUPPORT,
+                UserRole.ADMIN,
+            }
 
         confirm_message: Optional[Message] = None
         if bot.confirm_message_id is not None:

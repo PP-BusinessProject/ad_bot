@@ -1,8 +1,8 @@
 from asyncio import sleep
-from typing import Optional
+from typing import Optional, Self
 
 from pyrogram.connection.connection import Connection, log
-from typing_extensions import Self
+from pyrogram.connection.transport import TCPAbridged
 
 
 class AdBotConnection(Connection):
@@ -15,7 +15,7 @@ class AdBotConnection(Connection):
                 await self.protocol.connect(self.address)
             except OSError as e:
                 log.warning(f'Unable to connect due to network issues: {e}')
-                self.protocol.close()
+                await self.protocol.close()
                 await sleep(1)
             else:
                 log.info(
@@ -31,13 +31,3 @@ class AdBotConnection(Connection):
         else:
             log.warning('Connection failed! Trying again...')
             raise TimeoutError
-
-    def close(self: Self, /) -> None:
-        self.protocol.close()
-        log.info('Disconnected')
-
-    async def send(self: Self, data: bytes, /) -> None:
-        return await self.protocol.send(data)
-
-    async def recv(self: Self, /) -> Optional[bytes]:
-        return await self.protocol.recv()

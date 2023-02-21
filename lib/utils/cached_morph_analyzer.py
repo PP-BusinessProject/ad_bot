@@ -3,11 +3,10 @@
 from abc import ABC
 from datetime import timedelta
 from decimal import Decimal
-from typing import ClassVar, Type, Union
+from typing import ClassVar, Self, Type, Union
 
 from pymorphy2.analyzer import MorphAnalyzer, Parse
 from pymorphy2.tagset import OpencorporaTag
-from typing_extensions import Self
 
 
 class CachedMorphAnalyzer(ABC):

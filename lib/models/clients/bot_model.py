@@ -1,15 +1,17 @@
 """The module that provides a `BotModel`."""
 
-from typing import TYPE_CHECKING, Final, Optional, Type
+from typing import TYPE_CHECKING, Final, List, Optional, Self, Type
 
+from sqlalchemy import CheckConstraint
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
+from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.expression import ClauseElement
 from sqlalchemy.sql.schema import Column, ForeignKey
 from sqlalchemy.sql.sqltypes import Integer, String
-from typing_extensions import Self
 
+from .._constraints import MAX_NAME_LENGTH, MAX_USERNAME_LENGTH
 from .._mixins import Timestamped
 from ..base_interface import Base
 from ..bots.client_model import ClientModel
@@ -82,60 +84,49 @@ class BotModel(Timestamped, Base):
             The ads that belong to this bot. If any were fetched yet.
     """
 
-    owner_id: Final[Column[int]] = Column(
-        'OwnerId',
+    owner_id: Final = Column(
         UserModel.id.type,
         ForeignKey(UserModel.id, onupdate='CASCADE', ondelete='CASCADE'),
         primary_key=True,
-        key='owner_id',
     )
     id: Final[Column[int]] = Column(
-        'Id',
         Integer,
+        CheckConstraint('id >= 0'),
         primary_key=True,
-        key='id',
+        autoincrement=True,
     )
-    forward_to_id: Final[Column[int]] = Column(
-        'ForwardToId',
+    forward_to_id: Final = Column(
         UserModel.id.type,
         nullable=False,
-        key='forward_to_id',
     )
     reply_message_id: Final[Column[Optional[int]]] = Column(
-        'ReplyMessageId',
         Integer,
-        key='reply_message_id',
+        CheckConstraint('reply_message_id > 0'),
     )
     first_name: Final[Column[str]] = Column(
-        'FirstName',
-        String(64),
+        String(MAX_NAME_LENGTH),
+        CheckConstraint("first_name <> ''"),
         nullable=False,
         default='Бот',
-        key='first_name',
     )
     last_name: Final[Column[Optional[str]]] = Column(
-        'LastName',
-        String(64),
-        key='last_name',
+        String(MAX_NAME_LENGTH),
+        CheckConstraint("last_name <> ''"),
     )
     username: Final[Column[Optional[str]]] = Column(
-        'Username',
-        String(32),
+        String(MAX_USERNAME_LENGTH),
+        CheckConstraint("username <> ''"),
         unique=True,
-        key='username',
     )
     about: Final[Column[Optional[str]]] = Column(
-        'About',
         String(70),
-        key='about',
+        CheckConstraint("about <> ''"),
     )
     avatar_message_id: Final[Column[Optional[int]]] = Column(
-        'AvatarMessageId',
         Integer,
-        key='avatar_message_id',
+        CheckConstraint('avatar_message_id > 0'),
     )
     phone_number: Final[Column[Optional[int]]] = Column(
-        'PhoneNumber',
         ForeignKey(
             ClientModel.phone_number,
             onupdate='CASCADE',
@@ -143,28 +134,26 @@ class BotModel(Timestamped, Base):
         ),
         unique=True,
         index=True,
-        key='phone_number',
     )
     confirm_message_id: Column[Optional[int]] = Column(
-        'ConfirmMessageId',
         Integer,
-        key='confirm_message_id',
+        CheckConstraint('confirm_message_id > 0'),
     )
-    owner: Final['RelationshipProperty[UserModel]'] = relationship(
+    owner: Mapped['RelationshipProperty[UserModel]'] = relationship(
         'UserModel',
         back_populates='bots',
         lazy='joined',
         cascade='save-update',
         uselist=False,
     )
-    sender_client: Final['RelationshipProperty[ClientModel]'] = relationship(
+    sender_client: Mapped['RelationshipProperty[ClientModel]'] = relationship(
         'ClientModel',
         back_populates='owner_bot',
         lazy='noload',
         cascade='save-update',
         uselist=False,
     )
-    ads: Final['RelationshipProperty[list[AdModel]]'] = relationship(
+    ads: Mapped['RelationshipProperty[List[AdModel]]'] = relationship(
         'AdModel',
         back_populates='owner_bot',
         lazy='noload',
