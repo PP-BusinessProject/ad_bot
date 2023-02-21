@@ -12,6 +12,7 @@ COPY /bin /app
 COPY /lib /app/lib
 
 # install dependencies
+RUN pip install --upgrade pip
 RUN pip install -r requirements.txt
 
 # set environment variables
@@ -21,4 +22,4 @@ ENV PORT 8080
 EXPOSE 8080
 
 # command to run on container start
-CMD [ "python", "-m", "app.main" ]
+CMD [ "python", "-m", "main" ]
