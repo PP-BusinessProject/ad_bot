@@ -1,0 +1,34 @@
+app = "ad-bot"
+
+kill_signal = "SIGINT"
+kill_timeout = 30
+
+[build]
+  builder = "heroku/buildpacks:20"
+  buildpacks = ["heroku/python"]
+
+[deploy]
+  release_command = "python -m bin.main"
+
+[[services]]
+  internal_port = 5432
+  protocol = "tcp"
+
+  [services.concurrency]
+    type = "connections"
+    hard_limit = 25
+    soft_limit = 20
+
+  [[services.ports]]
+    handlers = ["http"]
+    port = "80"
+
+  [[services.ports]]
+    handlers = ["tls", "http"]
+    port = "443"
+
+  [[services.tcp_checks]]
+    grace_period = "1s"
+    interval = "15s"
+    restart_limit = 0
+    timeout = "2s"

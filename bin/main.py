@@ -52,14 +52,19 @@ if __name__ == '__main__':
                         + environ.get(
                             'DATABASE_URL',
                             'postgres:postgres@localhost:5432/ad_bot',
-                        ).split('://')[-1],
+                        )
+                        .split('://')[-1]
+                        .split('?')[0],
                         poolclass=AsyncAdaptedQueuePool,
                         pool_size=20,
                         max_overflow=0,
                         pool_recycle=3600,
                         pool_pre_ping=True,
                         pool_use_lifo=True,
-                        connect_args=dict(server_settings=dict(jit='off')),
+                        connect_args=dict(
+                            ssl=False,
+                            server_settings=dict(jit='off'),
+                        ),
                     ),
                     class_=AsyncSession,
                     expire_on_commit=False,

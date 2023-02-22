@@ -11,6 +11,7 @@ from pyrogram.errors.exceptions.bad_request_400 import (
     ChatAdminRequired,
     ChatRestricted,
     PeerIdInvalid,
+    UserBannedInChannel,
 )
 from pyrogram.errors.exceptions.flood_420 import SlowmodeWait
 from pyrogram.errors.exceptions.forbidden_403 import ChatWriteForbidden
@@ -39,11 +40,12 @@ class ChatDeactivatedCause(IntEnum):
     PEER_INVALID: Final[int] = auto()
     SLOWMODE: Final[int] = auto()
     INVALID: Final[int] = auto()
-    BANNED: Final[int] = auto()
+    CHANNEL_BANNED: Final[int] = auto()
     PRIVATE: Final[int] = auto()
     ADMIN_REQUIRED: Final[int] = auto()
     WRITE_FORBIDDEN: Final[int] = auto()
     RESTRICTED: Final[int] = auto()
+    USER_BANNED: Final[int] = auto()
 
     @classmethod
     def from_exception(cls: Type[Self], exception: BaseException, /) -> Self:
@@ -64,6 +66,8 @@ class ChatDeactivatedCause(IntEnum):
             return cls.WRITE_FORBIDDEN
         elif isinstance(exception, ChatRestricted):
             return cls.RESTRICTED
+        elif isinstance(exception, UserBannedInChannel):
+            return cls.USER_BANNED
         else:
             return cls.UNKNOWN
 

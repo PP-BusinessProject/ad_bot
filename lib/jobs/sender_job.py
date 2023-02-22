@@ -17,6 +17,7 @@ from pyrogram.errors import (
     PeerIdInvalid,
     SlowmodeWait,
     Unauthorized,
+    UserBannedInChannel,
 )
 from pyrogram.errors.exceptions.bad_request_400 import (
     MessageIdInvalid,
@@ -308,6 +309,7 @@ class SenderJob(object):
                     ChatAdminRequired,
                     ChatWriteForbidden,
                     ChatRestricted,
+                    UserBannedInChannel,
                 ) as e:
                     chat.active = False
                     chat.deactivated_cause = (

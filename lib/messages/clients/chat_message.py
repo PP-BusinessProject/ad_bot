@@ -386,7 +386,8 @@ class ChatMessage(object):
                         else 'Канал не валиден.'
                         if chat.deactivated_cause == CHAT_DEACTIVATED.INVALID
                         else 'Канал был забанен.'
-                        if chat.deactivated_cause == CHAT_DEACTIVATED.BANNED
+                        if chat.deactivated_cause
+                        == CHAT_DEACTIVATED.CHANNEL_BANNED
                         else 'Приватный канал.'
                         if chat.deactivated_cause == CHAT_DEACTIVATED.PRIVATE
                         else 'Для рассылки в этом чате необходимо обладать '
@@ -399,6 +400,9 @@ class ChatMessage(object):
                         else 'Канал ограничен.'
                         if chat.deactivated_cause
                         == CHAT_DEACTIVATED.RESTRICTED
+                        else 'Юзер забанен.'
+                        if chat.deactivated_cause
+                        == CHAT_DEACTIVATED.USER_BANNED
                         else 'Неизвестна.'
                     )
                     if chat.deactivated_cause is not None
