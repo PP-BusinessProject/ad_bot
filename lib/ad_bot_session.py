@@ -93,9 +93,9 @@ class Result(object):
 
 class AdBotSession(Session):
     START_TIMEOUT: Final[int] = 1
-    WAIT_TIMEOUT: Final[int] = 15
+    WAIT_TIMEOUT: Final[int] = 5
     SLEEP_THRESHOLD: Final[int] = 10
-    MAX_RETRIES: Final[int] = 5
+    MAX_RETRIES: Final[int] = 1
     ACKS_THRESHOLD: Final[int] = 8
     PING_INTERVAL: Final[int] = 5
     STORED_MSG_IDS_MAX_SIZE: Final[int] = 2000
@@ -139,15 +139,14 @@ class AdBotSession(Session):
         self.is_started = Event()
 
     async def start(self: Self, /) -> None:
-        self.connection = Connection(
-            self.dc_id,
-            self.test_mode,
-            self.client.ipv6,
-            self.client.proxy,
-            self.is_media,
-        )
-
         while True:
+            self.connection = Connection(
+                self.dc_id,
+                self.test_mode,
+                self.client.ipv6,
+                self.client.proxy,
+                self.is_media,
+            )
             try:
                 await self.connection.connect()
                 if self.auth_key is None or self.auth_key_id is None:
@@ -160,13 +159,13 @@ class AdBotSession(Session):
                     self.auth_key_id = sha1(
                         self.auth_key, usedforsecurity=False
                     ).digest()[-8:]
-                self.network_task = self.client.loop.create_task(
+                self.network_task: Task[None] = self.client.loop.create_task(
                     self.network_worker()
                 )
-                await self._send(Ping(ping_id=0), self.START_TIMEOUT)
+                await self.send(Ping(ping_id=0), self.START_TIMEOUT)
 
                 if not self.is_cdn:
-                    await self._send(
+                    await self.send(
                         InvokeWithLayer(
                             layer=layer,
                             query=InitConnection(
@@ -226,7 +225,8 @@ class AdBotSession(Session):
             with suppress(JobLookupError):
                 self.ping_job.remove()
 
-        await self.connection.close()
+        if self.connection is not None:
+            await self.connection.close()
         if self.network_task is not None:
             await self.network_task
 
@@ -339,7 +339,7 @@ class AdBotSession(Session):
             log.debug(f'Send {len(self.pending_acks)} acks')
             with suppress(BaseException):
                 msg_ids = list(self.pending_acks)
-                await self._send(MsgsAck(msg_ids=msg_ids), wait_response=False)
+                await self.send(MsgsAck(msg_ids=msg_ids), wait_response=False)
                 self.pending_acks.clear()
 
         for update in updates:
@@ -472,7 +472,7 @@ class AdBotSession(Session):
                         break
 
     async def ping_worker(self: Self, /) -> None:
-        await self._send(
+        await self.send(
             PingDelayDisconnect(
                 ping_id=0,
                 disconnect_delay=int(self.WAIT_TIMEOUT + 10),
@@ -483,11 +483,11 @@ class AdBotSession(Session):
     async def network_worker(self: Self, /) -> None:
         log.info('NetworkTask started')
 
-        def print_exception(task: Task, /) -> None:
-            try:
-                task.result()
-            except BaseException:
-                print_exc()
+        # def print_exception(task: Task, /) -> None:
+        #     try:
+        #         task.result()
+        #     except BaseException:
+        #         print_exc()
 
         while True:
             packet = await self.connection.recv()
@@ -495,17 +495,14 @@ class AdBotSession(Session):
                 if packet:
                     print(f"Server sent '{Int.read(BytesIO(packet))}'")
                 if self.is_started.is_set():
-                    self.client.loop.create_task(self.restart())
+                    await self.restart()
                 break
 
-            task = self.client.loop.create_task(
-                self.client.storage.scoped(self.handle_packet)(packet)
-            )
-            task.add_done_callback(print_exception)
+            await self.client.storage.scoped(self.handle_packet)(packet)
 
         log.info('NetworkTask stopped')
 
-    async def _send(
+    async def send(
         self: Self,
         /,
         data: TLObject,
@@ -548,11 +545,11 @@ class AdBotSession(Session):
             raise BadMsgNotificationError(result.error_code)
         elif isinstance(result, BadServerSalt):
             self.salt = result.new_server_salt
-            return await self._send(data, timeout, wait_response=wait_response)
+            return await self.send(data, timeout, wait_response=wait_response)
         else:
             return result
 
-    async def send(
+    async def invoke(
         self: Self,
         /,
         data: TLObject,
@@ -570,7 +567,7 @@ class AdBotSession(Session):
 
         while True:
             try:
-                return await self._send(data, timeout=timeout)
+                return await self.send(data, timeout=timeout)
             except FloodWait as e:
                 if (amount := e.value) > (
                     sleep_threshold or self.SLEEP_THRESHOLD
@@ -590,11 +587,11 @@ class AdBotSession(Session):
                 InternalServerError,
                 ServiceUnavailable,
             ) as e:
-                if retries == 0:
+                if retries <= 0:
                     raise e from None
 
                 (log.warning if retries < 2 else log.info)(
-                    f'[{Session.MAX_RETRIES - retries + 1}] Retrying '
+                    f'[{self.MAX_RETRIES - retries + 1}] Retrying '
                     f"'{query}' due to {str(e) or repr(e)}'"
                 )
 

@@ -104,7 +104,7 @@ class ReplyToUser(object):
                     f'[пользователю](tg://user?id={forward_id})).',
                 )
 
-        else:
+        elif not message.from_user.is_bot:
             if owner_bot.forward_to_id is not None:
                 with suppress(RPCError):
                     await self.forward_messages(

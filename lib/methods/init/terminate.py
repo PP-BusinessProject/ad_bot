@@ -23,13 +23,12 @@ class Terminate(object):
             ConnectionError: In case you try to terminate a client that is
             already terminated.
         """
-        if not self.is_initialized:
-            raise ConnectionError("Client is already terminated")
-        elif self.takeout_id:
+        if self.takeout_id:
             await self.invoke(FinishTakeoutSession())
             log.warning(f"Takeout session {self.takeout_id} finished")
 
-        for media_session in self.media_sessions.values():
-            await media_session.stop()
-        self.media_sessions.clear()
+        if getattr(self, 'media_sessions', None) is not None:
+            for media_session in self.media_sessions.values():
+                await media_session.stop()
+            self.media_sessions.clear()
         self.is_initialized = False

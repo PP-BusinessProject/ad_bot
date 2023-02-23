@@ -1,8 +1,7 @@
 from asyncio import sleep
-from typing import Optional, Self
+from typing import Self
 
 from pyrogram.connection.connection import Connection, log
-from pyrogram.connection.transport import TCPAbridged
 
 
 class AdBotConnection(Connection):

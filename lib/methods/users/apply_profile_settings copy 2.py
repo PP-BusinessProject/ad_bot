@@ -50,8 +50,7 @@ class ApplyProfileSettings(object):
             _ = 'Владелец'
             await self.add_contact(bot.owner.id, _, share_phone_number=True)
         if bot.owner.role != UserRole.ADMIN:
-            role: UserRole
-            async for user_id, role in await self.storage.Session.stream(
+            users = await self.storage.Session.execute(
                 select(UserModel.id, UserModel.role)
                 .where(
                     UserModel.role.cast(String).in_(
@@ -59,7 +58,8 @@ class ApplyProfileSettings(object):
                     )
                 )
                 .where(UserModel.id != bot.owner.id)
-            ):
+            )
+            for user_id, role in users.all():
                 _ = ' '.join((role.translation.capitalize(), str(user_id)))
                 await self.add_contact(user_id, _, share_phone_number=True)
 

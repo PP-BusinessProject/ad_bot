@@ -125,8 +125,8 @@ class ChatMessage(object):
                             ),
                         )
                     ]
-                    async for chat in (
-                        await self.storage.Session.stream_scalars(
+                    for chat in (
+                        await self.storage.Session.scalars(
                             select(ChatModel)
                             .order_by(
                                 ChatModel.created_at.desc(),
@@ -139,7 +139,7 @@ class ChatMessage(object):
                                 * page_list_size,
                             )
                         )
-                    )
+                    ).all()
                 ]
                 + [[IKB('Назад', Query(self.SERVICE._SELF))]]
             ),
@@ -252,22 +252,19 @@ class ChatMessage(object):
 
         elif data.command == self.SENDER_CHAT.REFRESH:
             workers_flood: dict[int, float] = {}
-            phone_number: int
-            async for phone_number in (
-                await self.storage.Session.stream_scalars(
-                    select(ClientModel.phone_number)
-                    .filter(
-                        ClientModel.valid,
-                        exists(text('NULL'))
-                        .where(
-                            SessionModel.phone_number
-                            == ClientModel.phone_number
-                        )
-                        .where(SessionModel.user_id.is_not(None)),
+            phone_numbers = await self.storage.Session.scalars(
+                select(ClientModel.phone_number)
+                .filter(
+                    ClientModel.valid,
+                    exists(text('NULL'))
+                    .where(
+                        SessionModel.phone_number == ClientModel.phone_number
                     )
-                    .order_by(ClientModel.created_at)
+                    .where(SessionModel.user_id.is_not(None)),
                 )
-            ):
+                .order_by(ClientModel.created_at)
+            )
+            for phone_number in phone_numbers.all():
                 async with auto_init(self.get_worker(phone_number)) as worker:
                     try:
                         _chat = await worker.check_chats(
@@ -687,8 +684,8 @@ class ChatMessage(object):
 
         workers_flood: dict[int, float] = {
             phone_number: float('-inf')
-            async for phone_number in (
-                await self.storage.Session.stream_scalars(
+            for phone_number in (
+                await self.storage.Session.scalars(
                     select(ClientModel.phone_number)
                     .filter(
                         ClientModel.valid,
@@ -701,7 +698,7 @@ class ChatMessage(object):
                     )
                     .order_by(ClientModel.created_at)
                 )
-            )
+            ).all()
         }
         if not workers_flood:
             return await abort(

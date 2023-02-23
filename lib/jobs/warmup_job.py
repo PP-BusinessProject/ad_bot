@@ -63,8 +63,7 @@ class WarmupJob(object):
         if not (sender_chats := sender_chats.all()):
             return
 
-        phone_number: int
-        async for phone_number in await self.storage.Session.stream_scalars(
+        phone_numbers = await self.storage.Session.scalars(
             select(ClientModel.phone_number).filter(
                 ClientModel.warmup,
                 ~ClientModel.invalid,
@@ -73,7 +72,8 @@ class WarmupJob(object):
                 .where(SessionModel.phone_number == ClientModel.phone_number)
                 .where(SessionModel.user_id.is_not(None)),
             )
-        ):
+        )
+        for phone_number in phone_numbers.all():
             async with auto_init(self.get_worker(phone_number)) as worker:
                 try:
                     chats: dict[int, Chat] = {
@@ -96,8 +96,7 @@ class WarmupJob(object):
                         )
                         await self.storage.Session.commit()
                     finally:
-                        async with auto_init(worker, start=False, stop=True):
-                            await worker.storage.delete()
+                        await worker.storage.delete()
                     continue
                 except RPCError:
                     continue

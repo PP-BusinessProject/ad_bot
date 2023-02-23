@@ -175,26 +175,23 @@ class SettingsMessage(object):
             if not bot.confirmed:
                 return await abort('Бот не подтвержден.')
 
-            phone_number: int
-            async for phone_number in (
-                await self.storage.Session.stream_scalars(
-                    select(ClientModel.phone_number)
-                    .filter(
-                        ClientModel.valid,
-                        (ClientModel.phone_number == bot.phone_number)
-                        | ~exists(sql_text('NULL')).where(
-                            ClientModel.phone_number == BotModel.phone_number
-                        ),
-                        exists(sql_text('NULL'))
-                        .where(
-                            SessionModel.phone_number
-                            == ClientModel.phone_number
-                        )
-                        .where(SessionModel.user_id.is_not(None)),
+            phone_numbers = self.storage.Session.scalars(
+                select(ClientModel.phone_number)
+                .filter(
+                    ClientModel.valid,
+                    (ClientModel.phone_number == bot.phone_number)
+                    | ~exists(sql_text('NULL')).where(
+                        ClientModel.phone_number == BotModel.phone_number
+                    ),
+                    exists(sql_text('NULL'))
+                    .where(
+                        SessionModel.phone_number == ClientModel.phone_number
                     )
-                    .order_by(ClientModel.phone_number != bot.phone_number)
+                    .where(SessionModel.user_id.is_not(None)),
                 )
-            ):
+                .order_by(ClientModel.phone_number != bot.phone_number)
+            )
+            for phone_number in phone_numbers.all():
                 async with auto_init(self.get_worker(phone_number)) as worker:
                     try:
                         await worker.apply_profile_settings(bot)

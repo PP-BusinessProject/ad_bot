@@ -1,5 +1,6 @@
 """The module that provides a job for sending advertisments."""
 
+from asyncio import sleep as asleep
 from contextlib import suppress
 from datetime import datetime, timedelta
 from typing import TYPE_CHECKING, Optional
@@ -85,8 +86,7 @@ class SenderJob(object):
         """
         # TODO Следующее за последним обьявление в следующий за последним чат
         # для этого обьявления
-        bot: BotModel
-        async for bot in await self.storage.Session.stream_scalars(
+        bots = await self.storage.Session.scalars(
             select(BotModel)
             .join(BotModel.owner)
             .filter(
@@ -96,53 +96,36 @@ class SenderJob(object):
             )
             .options(contains_eager(BotModel.owner))
             .execution_options(populate_existing=True)
-        ):
-
-            async def revoke(worker: 'AdBotClient', /) -> None:
-                try:
-                    if bot.phone_number is not None:
-                        await self.storage.Session.execute(
-                            update(ClientModel)
-                            .values(active=False)
-                            .filter_by(phone_number=bot.phone_number)
-                        )
-                        await self.storage.Session.commit()
-                finally:
-                    async with auto_init(worker, start=False, stop=True):
-                        await worker.storage.delete()
-
+        )
+        for bot in bots.all():
             try:
                 # Sometimes expires
                 bot.phone_number
             except MissingGreenlet:
                 await self.storage.Session.refresh(bot)
 
-            phone_number: int
-            async for phone_number in (
-                await self.storage.Session.stream_scalars(
-                    select(ClientModel.phone_number)
-                    .filter(
-                        ClientModel.valid,
-                        (ClientModel.phone_number == bot.phone_number)
-                        | ~exists(text('NULL')).where(
-                            ClientModel.phone_number == BotModel.phone_number
-                        ),
-                        exists(text('NULL'))
-                        .where(
-                            SessionModel.phone_number
-                            == ClientModel.phone_number
-                        )
-                        .where(SessionModel.user_id.is_not(None)),
+            phone_numbers = await self.storage.Session.scalars(
+                select(ClientModel.phone_number)
+                .filter(
+                    ClientModel.valid,
+                    (ClientModel.phone_number == bot.phone_number)
+                    | ~exists(text('NULL')).where(
+                        ClientModel.phone_number == BotModel.phone_number
+                    ),
+                    exists(text('NULL'))
+                    .where(
+                        SessionModel.phone_number == ClientModel.phone_number
                     )
-                    .order_by(
-                        (ClientModel.phone_number != bot.phone_number).cast(
-                            Integer
-                        )
+                    .where(SessionModel.user_id.is_not(None)),
+                )
+                .order_by(
+                    (ClientModel.phone_number != bot.phone_number).cast(
+                        Integer
                     )
                 )
-            ):
-                worker = self.get_worker(phone_number)
-                async with auto_init(worker, stop=False):
+            )
+            for phone_number in phone_numbers.all():
+                async with auto_init(self.get_worker(phone_number)) as worker:
                     try:
                         if not await worker.check_chats(
                             (
@@ -153,144 +136,140 @@ class SenderJob(object):
                         ):
                             continue
                         elif phone_number == bot.phone_number:
+                            await self._sender_job(worker, bot)
                             break
                         await worker.apply_profile_settings(bot)
                     except Unauthorized:
-                        await revoke(worker)
+                        await self._revoke(worker, bot)
                         continue
                     except FloodWait:
                         continue
 
                     bot.phone_number = phone_number
                     await self.storage.Session.commit()
+                    await self._sender_job(worker, bot)
                     break
-
             else:
                 continue
 
-            if bot.owner.service_invite is None:
-                invite_link = await self.export_chat_invite_link(
-                    bot.owner.service_id
+    async def _revoke(
+        self: 'AdBotClient',
+        worker: 'AdBotClient',
+        bot: BotModel,
+        /,
+    ) -> None:
+        try:
+            if bot.phone_number is not None:
+                await self.storage.Session.execute(
+                    update(ClientModel)
+                    .values(active=False)
+                    .filter_by(phone_number=bot.phone_number)
                 )
-                bot.owner.service_invite = invite_link.invite_link
                 await self.storage.Session.commit()
+        finally:
+            await worker.storage.delete()
 
-            ad: AdModel
-            last_ad_chat_id: Optional[int]
-            checked_empty_categories: set[int] = set()
-            sent_ads_subquery = (
+    async def _sender_job(
+        self: 'AdBotClient',
+        worker: 'AdBotClient',
+        bot: BotModel,
+        /,
+    ) -> None:
+        if bot.owner.service_invite is None:
+            invite_link = await self.export_chat_invite_link(
+                bot.owner.service_id
+            )
+            bot.owner.service_invite = invite_link.invite_link
+            await self.storage.Session.commit()
+
+        ad: AdModel
+        last_ad_chat_id: Optional[int]
+        checked_empty_categories: set[int] = set()
+        sent_ads_subquery = (
+            select(
+                SentAdModel.ad_chat_id,
+                SentAdModel.ad_message_id,
+                SentAdModel.chat_id,
+                sql_max(SentAdModel.timestamp).label('Timestamp'),
+            )
+            .group_by(
+                SentAdModel.ad_chat_id,
+                SentAdModel.ad_message_id,
+                SentAdModel.chat_id,
+            )
+            .order_by(sql_max(SentAdModel.timestamp))
+            .subquery()
+            .alias()
+        )
+        ads = await self.storage.Session.execute(
+            select(AdModel, sent_ads_subquery.c.chat_id)
+            .join(sent_ads_subquery, isouter=True)
+            .where(with_parent(bot, BotModel.ads) & AdModel.valid)
+            .order_by(nullsfirst(sent_ads_subquery.c['Timestamp']))
+            .options(noload(AdModel.owner_bot))
+        )
+        for ad, last_ad_chat_id in ads.all():
+            if ad.category_id in checked_empty_categories:
+                continue
+
+            _chat: Optional[Chat] = None
+            sent_ad_chats_subquery = (
                 select(
-                    SentAdModel.ad_chat_id,
-                    SentAdModel.ad_message_id,
                     SentAdModel.chat_id,
                     sql_max(SentAdModel.timestamp).label('Timestamp'),
                 )
-                .group_by(
-                    SentAdModel.ad_chat_id,
-                    SentAdModel.ad_message_id,
-                    SentAdModel.chat_id,
-                )
+                .where(with_parent(ad, AdModel.sent_ads))
+                .group_by(SentAdModel.chat_id)
                 .order_by(sql_max(SentAdModel.timestamp))
                 .subquery()
                 .alias()
             )
-            async for ad, last_ad_chat_id in await self.storage.Session.stream(
-                select(AdModel, sent_ads_subquery.c.chat_id)
-                .join(sent_ads_subquery, isouter=True)
-                .where(with_parent(bot, BotModel.ads) & AdModel.valid)
-                .order_by(nullsfirst(sent_ads_subquery.c['Timestamp']))
-                .options(noload(AdModel.owner_bot))
-            ):
-                if ad.category_id in checked_empty_categories:
-                    continue
-
-                _chat: Optional[Chat] = None
-                sent_ad_chats_subquery = (
-                    select(
-                        SentAdModel.chat_id,
-                        sql_max(SentAdModel.timestamp).label('Timestamp'),
-                    )
-                    .where(with_parent(ad, AdModel.sent_ads))
-                    .group_by(SentAdModel.chat_id)
-                    .order_by(sql_max(SentAdModel.timestamp))
-                    .subquery()
-                    .alias()
+            sent_ad_chats_query = (
+                select(ChatModel)
+                .join(sent_ad_chats_subquery, isouter=True)
+                .filter(
+                    ChatModel.active,
+                    ad.category_id is None
+                    or ChatModel.category_id == ad.category_id,
+                    or_(
+                        sent_ad_chats_subquery.c['Timestamp'].is_(None),
+                        now() - sent_ad_chats_subquery.c['Timestamp']
+                        > ChatModel.period,
+                    ),
                 )
-                sent_ad_chats_query = (
-                    select(ChatModel)
-                    .join(sent_ad_chats_subquery, isouter=True)
-                    .filter(
-                        ChatModel.active,
-                        ad.category_id is None
-                        or ChatModel.category_id == ad.category_id,
-                        or_(
-                            sent_ad_chats_subquery.c['Timestamp'].is_(None),
-                            now() - sent_ad_chats_subquery.c['Timestamp']
-                            > ChatModel.period,
-                        ),
-                    )
+            )
+            chats = await self.storage.Session.scalars(
+                sent_ad_chats_query.order_by(
+                    (ChatModel.id <= last_ad_chat_id).cast(Integer),
+                    nullsfirst(sent_ad_chats_subquery.c['Timestamp']),
                 )
-                async for chat in await self.storage.Session.stream_scalars(
-                    sent_ad_chats_query.order_by(
-                        (ChatModel.id <= last_ad_chat_id).cast(Integer),
-                        nullsfirst(sent_ad_chats_subquery.c['Timestamp']),
-                    )
-                    if last_ad_chat_id is not None
-                    else sent_ad_chats_query.order_by(
-                        nullsfirst(sent_ad_chats_subquery.c['Timestamp']),
-                    )
-                ):
-                    try:
-                        if _chat := await worker.check_chats(
-                            (
-                                chat.id,
-                                chat.invite_link,
-                                f'@{chat.username}' if chat.username else None,
-                            ),
-                            folder_id=1,
-                        ):
-                            break
-                    except ValueError:
-                        pass
-                    except FloodWait:
-                        break
-                    except Unauthorized:
-                        await revoke(worker)
-                        break
-                    except (
-                        PeerIdInvalid,
-                        SlowmodeWait,
-                        ChannelBanned,
-                        ChannelPrivate,
-                        ChatAdminRequired,
-                        ChatWriteForbidden,
-                    ) as e:
-                        chat.active = False
-                        chat.deactivated_cause = (
-                            ChatDeactivatedCause.from_exception(e)
-                        )
-                        await self.storage.Session.commit()
-                    except RPCError as _:
-                        continue
-
-                if _chat is None:
-                    if ad.category_id is not None:
-                        checked_empty_categories.add(ad.category_id)
-                    break
-
+                if last_ad_chat_id is not None
+                else sent_ad_chats_query.order_by(
+                    nullsfirst(sent_ad_chats_subquery.c['Timestamp']),
+                )
+            )
+            for chat in chats.all():
                 try:
-                    message = await worker.get_messages(
-                        ad.chat_id, ad.message_id
+                    _chat = await worker.check_chats(
+                        (
+                            chat.id,
+                            chat.invite_link,
+                            f'@{chat.username}' if chat.username else None,
+                        ),
+                        folder_id=1,
                     )
-                    sent_msg = await message.copy(_chat.id)
-                    # sent_msg = await worker.send_message(
-                    #     *(_chat.id, ad.chat_id, ad.message_id),
-                    #     drop_author=True,
-                    # )
+                    if _chat is None:
+                        continue
+                    sent_msg = await worker.forward_messages(
+                        _chat.id,
+                        ad.chat_id,
+                        ad.message_id,
+                        drop_author=True,
+                    )
                     sent_ad = SentAdModel(
                         ad_chat_id=ad.chat_id,
                         ad_message_id=ad.message_id,
-                        chat_id=sent_msg.chat.id,
+                        chat_id=_chat.id,
                         message_id=sent_msg.id,
                         link=sent_msg.link,
                         timestamp=sent_msg.date,
@@ -311,13 +290,17 @@ class SenderJob(object):
                     ChatRestricted,
                     UserBannedInChannel,
                 ) as e:
-                    chat.active = False
+                    # chat.active = False
                     chat.deactivated_cause = (
                         ChatDeactivatedCause.from_exception(e)
                     )
                     await self.storage.Session.commit()
+                    continue
                 except Unauthorized:
-                    await revoke(worker)
+                    await self._revoke(worker, bot)
                 except FloodWait:
                     pass
                 break
+            else:
+                if ad.category_id is not None:
+                    checked_empty_categories.add(ad.category_id)

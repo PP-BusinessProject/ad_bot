@@ -22,9 +22,6 @@ class Connect(object):
             ConnectionError: In case you try to connect an already connected
             client.
         """
-        if self.is_connected:
-            raise ConnectionError('Client is already connected.')
-
         await self.storage.open()
         session = await self.storage._get_session()
         self.session = AdBotSession(

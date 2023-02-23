@@ -109,22 +109,19 @@ class ServiceSubscription(object):
                         'Заявка уже была отправлена администратору.'
                     )
 
-            phone_number: int
-            async for phone_number in (
-                await self.storage.Session.stream_scalars(
-                    select(ClientModel.phone_number)
-                    .where(ClientModel.valid)
+            phone_numbers = await self.storage.Session.scalars(
+                select(ClientModel.phone_number)
+                .where(ClientModel.valid)
+                .where(
+                    exists(text('NULL'))
                     .where(
-                        exists(text('NULL'))
-                        .where(
-                            SessionModel.phone_number
-                            == ClientModel.phone_number
-                        )
-                        .where(SessionModel.user_id == chat_id),
+                        SessionModel.phone_number == ClientModel.phone_number
                     )
-                    .order_by(ClientModel.created_at)
+                    .where(SessionModel.user_id == chat_id),
                 )
-            ):
+                .order_by(ClientModel.created_at)
+            )
+            for phone_number in phone_numbers.all():
                 async with auto_init(self.get_worker(phone_number)) as worker:
                     with suppress(RPCError):
                         user = await self.storage.Session.merge(
@@ -263,11 +260,11 @@ class ServiceSubscription(object):
                                     ),
                                 )
                             ]
-                            async for subscription in (
-                                await self.storage.Session.stream_scalars(
+                            for subscription in (
+                                await self.storage.Session.scalars(
                                     select(SubscriptionModel)
                                 )
-                            )
+                            ).all()
                         ]
                     )
                     + [

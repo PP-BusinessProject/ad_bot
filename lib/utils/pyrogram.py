@@ -411,12 +411,15 @@ class auto_init(Generic[_Client]):
         async with self._locks[self._client.phone_number]:
             if self._stop is None:
                 self._is_initialized = not self._client.is_initialized
-            if self._start and not self._client.is_initialized:
+            if self._start and (
+                not self._client.is_initialized
+                and not self._client.is_connected
+            ):
                 try:
-                    if not self._only_connect:
-                        await self._client.start()
-                    elif not self._client.is_connected:
+                    if self._only_connect:
                         await self._client.connect()
+                    else:
+                        await self._client.start()
                 except BaseException:
                     if not self._suppress:
                         raise

@@ -195,9 +195,9 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
         object.__setattr__(self, 'username', None)
         object.__setattr__(self, 'is_bot', None)
         if self.storage.is_nested:
-            self.groups[0] = [
-                AdBotHandler(self.reply_to_user, action=None, is_query=False)
-            ]
+            # self.groups[0] = [
+            #     AdBotHandler(self.reply_to_user, action=None, is_query=False)
+            # ]
             return
 
         self.groups[0] = [
@@ -396,5 +396,7 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
                 )
             if 'scheduler' not in kwargs:
                 kwargs['scheduler'] = self.scheduler
-            self.__class__._workers[phone_number] = self.__class__(**kwargs)
+            self.__class__._workers[phone_number] = self.__class__(
+                **kwargs, no_updates=True
+            )
         return self.__class__._workers[phone_number]

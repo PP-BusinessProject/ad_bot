@@ -297,21 +297,19 @@ class ServiceHelp(object):
                 'напишите **/start**.',
             )
 
-        phone_number: int
-        async for phone_number in (
-            await self.storage.Session.stream_scalars(
-                select(ClientModel.phone_number)
-                .where(ClientModel.valid)
-                .where(
-                    exists(text('NULL')).where(
-                        (SessionModel.phone_number == ClientModel.phone_number)
-                        & SessionModel.user_id
-                        == chat_id
-                    )
+        phone_numbers = await self.storage.Session.scalars(
+            select(ClientModel.phone_number)
+            .where(ClientModel.valid)
+            .where(
+                exists(text('NULL')).where(
+                    (SessionModel.phone_number == ClientModel.phone_number)
+                    & SessionModel.user_id
+                    == chat_id
                 )
-                .order_by(ClientModel.created_at)
             )
-        ):
+            .order_by(ClientModel.created_at)
+        )
+        for phone_number in phone_numbers.all():
             async with auto_init(self.get_worker(phone_number)) as worker:
                 with suppress(RPCError):
                     user = await self.storage.Session.merge(

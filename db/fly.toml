@@ -1,25 +1,28 @@
-app = "ad-bot"
+# fly.toml file generated for ad-bot-db on 2023-02-22T17:33:31+02:00
 
+app = "ad-bot-db"
 kill_signal = "SIGINT"
-kill_timeout = 30
+kill_timeout = 5
+processes = []
 
-[build]
-  builder = "heroku/buildpacks:20"
-  buildpacks = ["heroku/python"]
+[env]
 
-[processes]
-  main = "python -m bin.main"
+[experimental]
+  auto_rollback = true
 
 [[services]]
+  http_checks = []
   internal_port = 8080
+  processes = ["app"]
   protocol = "tcp"
-
+  script_checks = []
   [services.concurrency]
-    type = "connections"
     hard_limit = 25
     soft_limit = 20
+    type = "connections"
 
   [[services.ports]]
+    force_https = true
     handlers = ["http"]
     port = 80
 

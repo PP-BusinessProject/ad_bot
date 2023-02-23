@@ -5,7 +5,8 @@ from typing import TYPE_CHECKING
 from pyrogram.raw.core import TLObject
 from pyrogram.raw.functions.invoke_with_takeout import InvokeWithTakeout
 from pyrogram.raw.functions.invoke_without_updates import InvokeWithoutUpdates
-from pyrogram.session import Session
+
+from ...ad_bot_session import AdBotSession
 
 if TYPE_CHECKING:
     from ...ad_bot_client import AdBotClient
@@ -16,8 +17,8 @@ class Invoke(object):
         self: 'AdBotClient',
         /,
         data: TLObject,
-        retries: int = Session.MAX_RETRIES,
-        timeout: float = Session.WAIT_TIMEOUT,
+        retries: int = AdBotSession.MAX_RETRIES,
+        timeout: float = AdBotSession.WAIT_TIMEOUT,
         sleep_threshold: float = None,
         *,
         no_updates: bool = False,
@@ -64,7 +65,7 @@ class Invoke(object):
         if self.takeout_id:
             data = InvokeWithTakeout(takeout_id=self.takeout_id, query=data)
 
-        resp = await self.session.send(
+        resp = await self.session.invoke(
             *(data, retries, timeout),
             sleep_threshold
             if sleep_threshold is not None

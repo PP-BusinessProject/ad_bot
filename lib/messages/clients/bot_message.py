@@ -167,17 +167,21 @@ class BotMessage(object):
                             Query(self.BOT.PAGE, user.id, u_p=page_index),
                         )
                     ]
-                    async for user, bot in await self.storage.Session.stream(
-                        select(UserModel, BotModel)
-                        .join(UserModel.bots, isouter=True)
-                        .group_by(UserModel.id)
-                        .having(UserModel.role < user_role)
-                        .slice(
-                            min(page_index, total_pages - 1) * page_list_size,
-                            min(total_pages + 1, page_index) * page_list_size,
+                    for user, bot in (
+                        await self.storage.Session.execute(
+                            select(UserModel, BotModel)
+                            .join(UserModel.bots, isouter=True)
+                            .group_by(UserModel.id)
+                            .having(UserModel.role < user_role)
+                            .slice(
+                                min(page_index, total_pages - 1)
+                                * page_list_size,
+                                min(total_pages + 1, page_index)
+                                * page_list_size,
+                            )
+                            .options(contains_eager(BotModel.owner))
                         )
-                        .options(contains_eager(BotModel.owner))
-                    )
+                    ).all()
                 ]
                 + self.hpages(
                     page_index, total_pages, Query(self.BOT.LIST), kwarg='u_p'
@@ -253,22 +257,19 @@ class BotMessage(object):
             not bots_count and data.command == self.BOT.PAGE
         ):
             owner = await self.storage.Session.get(UserModel, bot_owner_id)
-            phone_number: int
-            async for phone_number in (
-                await self.storage.Session.stream_scalars(
-                    select(ClientModel.phone_number)
-                    .where(ClientModel.valid)
+            phone_numbers = await self.storage.Session.scalars(
+                select(ClientModel.phone_number)
+                .where(ClientModel.valid)
+                .where(
+                    exists(text('NULL'))
                     .where(
-                        exists(text('NULL'))
-                        .where(
-                            SessionModel.phone_number
-                            == ClientModel.phone_number
-                        )
-                        .where(SessionModel.user_id == chat_id),
+                        SessionModel.phone_number == ClientModel.phone_number
                     )
-                    .order_by(ClientModel.created_at)
+                    .where(SessionModel.user_id == chat_id),
                 )
-            ):
+                .order_by(ClientModel.created_at)
+            )
+            for phone_number in phone_numbers.all():
                 async with auto_init(self.get_worker(phone_number)) as worker:
                     with suppress(FloodWait):
                         try:
@@ -411,22 +412,19 @@ class BotMessage(object):
                     else 'У вас нет личного канала.'
                 )
 
-            phone_number: int
-            async for phone_number in (
-                await self.storage.Session.stream_scalars(
-                    select(ClientModel.phone_number)
-                    .where(ClientModel.valid)
+            phone_numbers = await self.storage.Session.scalars(
+                select(ClientModel.phone_number)
+                .where(ClientModel.valid)
+                .where(
+                    exists(text('NULL'))
                     .where(
-                        exists(text('NULL'))
-                        .where(
-                            SessionModel.phone_number
-                            == ClientModel.phone_number
-                        )
-                        .where(SessionModel.user_id == chat_id),
+                        SessionModel.phone_number == ClientModel.phone_number
                     )
-                    .order_by(ClientModel.created_at)
+                    .where(SessionModel.user_id == chat_id),
                 )
-            ):
+                .order_by(ClientModel.created_at)
+            )
+            for phone_number in phone_numbers.all():
                 async with auto_init(self.get_worker(phone_number)) as worker:
                     with suppress(RPCError):
                         if await worker.check_chats(

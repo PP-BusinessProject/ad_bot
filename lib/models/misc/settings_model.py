@@ -38,7 +38,7 @@ class SettingsModel(Base):
         Interval(second_precision=0),
         CheckConstraint("send_interval > INTERVAL '0 days'"),
         nullable=False,
-        default=timedelta(seconds=10),
+        default=timedelta(seconds=30),
     )
     warmup_interval: Final[Column[timedelta]] = Column(
         Interval(second_precision=0),

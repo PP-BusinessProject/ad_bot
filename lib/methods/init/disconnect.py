@@ -16,11 +16,8 @@ class Disconnect(object):
             disconnected client or in case you try to disconnect a client
             that needs to be terminated first.
         """
-        if not self.is_connected:
-            raise ConnectionError('Client is already disconnected.')
-        elif self.is_initialized:
-            raise ConnectionError("Can't disconnect an initialized client.")
-
-        await self.session.stop()
-        await self.storage.close()
+        if getattr(self, 'session', None) is not None:
+            await self.session.stop()
+        if getattr(self, 'storage', None) is not None:
+            await self.storage.close()
         self.is_connected = False

@@ -351,8 +351,8 @@ class AdMessage(object):
                             url=sent_ad.link,
                         )
                     ]
-                    async for sent_ad in (
-                        await self.storage.Session.stream_scalars(
+                    for sent_ad in (
+                        await self.storage.Session.scalars(
                             select(SentAdModel)
                             .where(with_parent(ad, AdModel.sent_ads))
                             .order_by(SentAdModel.timestamp.desc())
@@ -373,7 +373,7 @@ class AdMessage(object):
                                 joinedload(SentAdModel.chat),
                             )
                         )
-                    )
+                    ).all()
                 ]
                 + self.hpages(
                     journal_page_index,

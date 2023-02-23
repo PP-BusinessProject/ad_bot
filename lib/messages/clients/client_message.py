@@ -99,17 +99,21 @@ class ClientMessage(object):
                             ),
                         )
                     ]
-                    async for (
-                        sender_phone_number,
-                        sender_active,
-                    ) in await self.storage.Session.stream(
-                        select(ClientModel.phone_number, ClientModel.active)
-                        .order_by(ClientModel.created_at)
-                        .slice(
-                            min(page_index, total_pages - 1) * page_list_size,
-                            min(page_index + 1, total_pages) * page_list_size,
+                    for sender_phone_number, sender_active in (
+                        await self.storage.Session.execute(
+                            select(
+                                ClientModel.phone_number,
+                                ClientModel.active,
+                            )
+                            .order_by(ClientModel.created_at)
+                            .slice(
+                                min(page_index, total_pages - 1)
+                                * page_list_size,
+                                min(page_index + 1, total_pages)
+                                * page_list_size,
+                            )
                         )
-                    )
+                    ).all()
                 ]
                 + self.hpages(
                     page_index,
@@ -173,6 +177,7 @@ class ClientMessage(object):
                         self.SENDER_CLIENT.AUTH_REGISTER_RETRY,
                     )
                 ),
+                used_messages=[InputMessageModel(message_id=message_id)],
             )
             self.storage.Session.add(input)
             await self.storage.Session.commit()
