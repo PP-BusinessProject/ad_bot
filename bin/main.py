@@ -40,6 +40,13 @@ if __name__ == '__main__':
                 replace_existing=True,
             ),
         ),
+        # proxy=dict(
+        #     scheme='http',
+        #     hostname='0.0.0.0',
+        #     port=int(environ['PORT'].strip()),
+        # )
+        # if environ.get('PORT')
+        # else None,
         storage=SQLAlchemyStorage(
             phone_number=0,
             api_id=int(environ['ADBOT_API_ID'].strip()),
@@ -51,7 +58,7 @@ if __name__ == '__main__':
                         url='postgresql+asyncpg://'
                         + environ.get(
                             'DATABASE_URL',
-                            'postgres:postgres@localhost:5433/ad_bot',
+                            'timmy:postgres@localhost:5432/ad_bot',
                         )
                         .split('://')[-1]
                         .split('?')[0],

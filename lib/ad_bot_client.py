@@ -122,7 +122,7 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
         workers: int = Client.WORKERS,
         plugins: Optional[dict] = None,
         parse_mode: ParseMode = ParseMode.DEFAULT,
-        sleep_threshold: int = Session.SLEEP_THRESHOLD,
+        sleep_threshold: int = AdBotSession.SLEEP_THRESHOLD,
         max_concurrent_transmissions: int = Client.MAX_CONCURRENT_TRANSMISSIONS,
         executor: Optional[Executor] = None,
         *,

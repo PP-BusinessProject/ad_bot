@@ -1,32 +1,57 @@
-from asyncio import sleep
-from typing import Self
+from typing import TYPE_CHECKING, Optional, Final, Self
+from asyncio import sleep as asleep
+from logging import getLogger
+from pyrogram.connection.transport import TCP, TCPAbridged
+from pyrogram.session.internals import DataCenter
+from pyrogram.connection.connection import Connection
 
-from pyrogram.connection.connection import Connection, log
+if TYPE_CHECKING:
+    from .ad_bot_client import AdBotClient
+
+log = getLogger(__name__)
 
 
-class AdBotConnection(Connection):
-    async def connect(self: Self, /) -> None:
-        for _ in range(self.MAX_RETRIES):
-            self.protocol = self.mode(self.ipv6, self.proxy)
+class AdBotConnection(object):
+    MAX_CONNECTION_ATTEMPTS: Final[int] = 1
 
+    def __init__(
+        self: Self,
+        client: 'AdBotClient',
+        address: DataCenter,
+        /,
+    ):
+        self.client, self.address = client, address
+        self.protocol: TCP = None
+
+    async def connect(self: Self, /):
+        for _ in range(self.MAX_CONNECTION_ATTEMPTS):
+            self.protocol = TCPAbridged(self.client.ipv6, self.client.proxy)
             try:
-                log.info('Connecting...')
+                log.debug('[%s] Connecting...', self.client.phone_number)
                 await self.protocol.connect(self.address)
             except OSError as e:
-                log.warning(f'Unable to connect due to network issues: {e}')
-                await self.protocol.close()
-                await sleep(1)
-            else:
-                log.info(
-                    'Connected! {} DC{}{} - IPv{} - {}'.format(
-                        'Test' if self.test_mode else 'Production',
-                        self.dc_id,
-                        ' (media)' if self.media else '',
-                        '6' if self.ipv6 else '4',
-                        self.mode.__name__,
-                    )
+                log.warning(
+                    '[%s] Unable to connect due to network issues: %s',
+                    self.client.phone_number,
+                    e,
                 )
+                await self.protocol.close()
+                await asleep(1)
+            else:
                 break
         else:
-            log.warning('Connection failed! Trying again...')
-            raise TimeoutError
+            log.warning(
+                '[%s] Connection failed! Trying again...',
+                self.client.phone_number,
+            )
+            raise ConnectionError
+
+    async def close(self: Self, /) -> None:
+        await self.protocol.close()
+        log.debug('[%s] Disconnected', self.client.phone_number)
+
+    async def send(self: Self, data: bytes, /) -> None:
+        await self.protocol.send(data)
+
+    async def recv(self: Self, /) -> Optional[bytes]:
+        return await self.protocol.recv()

@@ -1,11 +1,23 @@
-app = "ad-bot"
+# fly.toml file generated for ad-bot on 2023-02-24T14:14:15+02:00
 
+app = "ad-bot"
 kill_signal = "SIGINT"
-kill_timeout = 30
+kill_timeout = 10
 
 [build]
   builder = "heroku/buildpacks:20"
   buildpacks = ["heroku/python"]
+
+[env]
+  ADBOT_API_HASH = "3c2a25a9c380673b4a9563cd2501fc23"
+  ADBOT_API_ID = "4277770"
+  ADBOT_TOKEN = "5334726164:AAFfkU30-Ww00tK10l_An9vAN9hJzhLssKI"
+  LOGGING = "INFO"
+  PORT = "8080"
+  TZ = "Europe/Kiev"
+
+[deploy]
+  strategy = "immediate"
 
 [processes]
   main = "python -m bin.main"
@@ -13,11 +25,10 @@ kill_timeout = 30
 [[services]]
   internal_port = 8080
   protocol = "tcp"
-
   [services.concurrency]
-    type = "connections"
     hard_limit = 25
     soft_limit = 20
+    type = "connections"
 
   [[services.ports]]
     handlers = ["http"]

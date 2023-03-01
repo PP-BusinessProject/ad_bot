@@ -1,4 +1,5 @@
-from asyncio import Event, Task, TimeoutError, sleep, wait_for
+from asyncio import Event, Task, TimeoutError, current_task, wait_for
+from asyncio import sleep as asleep
 from bisect import insort
 from contextlib import suppress
 from ctypes import Union
@@ -76,10 +77,12 @@ from pyrogram.session.internals import MsgFactory, MsgId
 from pyrogram.session.session import Session, log
 from pyrogram.types.messages_and_media.message import Message
 from pyrogram.utils import get_peer_id
-
+from pyrogram.session.internals import DataCenter
 from .ad_bot_auth import AdBotAuth
 from .ad_bot_handler import AdBotHandler
 from .utils.query import Query
+from .ad_bot_connection import AdBotConnection
+from pyrogram.connection.transport import TCPAbridged
 
 if TYPE_CHECKING:
     from .ad_bot_client import AdBotClient
@@ -140,15 +143,25 @@ class AdBotSession(Session):
 
     async def start(self: Self, /) -> None:
         while True:
-            self.connection = Connection(
-                self.dc_id,
-                self.test_mode,
-                self.client.ipv6,
-                self.client.proxy,
-                self.is_media,
+            self.connection = AdBotConnection(
+                self.client,
+                DataCenter(
+                    self.dc_id,
+                    self.test_mode,
+                    self.client.ipv6,
+                    self.is_media,
+                ),
             )
             try:
                 await self.connection.connect()
+                log.info(
+                    '[%s] Connected! %s DC%s%s - IPv%s',
+                    self.client.phone_number,
+                    'Test' if self.test_mode else 'Production',
+                    self.dc_id,
+                    ' (media)' if self.is_media else '',
+                    '6' if self.client.ipv6 else '4',
+                )
                 if self.auth_key is None or self.auth_key_id is None:
                     self.auth_key = await self.client.storage.auth_key()
                     if self.auth_key is None:
@@ -192,14 +205,22 @@ class AdBotSession(Session):
                     next_run_time=datetime.now(),
                 )
 
-                log.info(f'Session initialized: Layer {layer}')
-                log.info(
-                    f'Device: {self.client.device_model} - '
-                    f'{self.client.app_version}'
+                log.debug(
+                    '[%s] Session initialized: Layer %s',
+                    self.client.phone_number,
+                    layer,
                 )
-                log.info(
-                    f'System: {self.client.system_version} '
-                    f'({self.client.lang_code.upper()})'
+                log.debug(
+                    '[%s] Device: %s - %s',
+                    self.client.phone_number,
+                    self.client.device_model,
+                    self.client.app_version,
+                )
+                log.debug(
+                    '[%s] System: %s (%s)',
+                    self.client.phone_number,
+                    self.client.system_version,
+                    self.client.lang_code.upper(),
                 )
 
             except (OSError, TimeoutError, RPCError):
@@ -227,7 +248,9 @@ class AdBotSession(Session):
 
         if self.connection is not None:
             await self.connection.close()
-        if self.network_task is not None:
+        if self.network_task is not None and (
+            current_task() != self.network_task
+        ):
             await self.network_task
 
         for i in self.results.values():
@@ -267,9 +290,7 @@ class AdBotSession(Session):
 
             try:
                 if len(self.stored_msg_ids) > self.STORED_MSG_IDS_MAX_SIZE:
-                    del self.stored_msg_ids[
-                        : self.STORED_MSG_IDS_MAX_SIZE // 2
-                    ]
+                    del self.stored_msg_ids[: self.STORED_MSG_IDS_MAX_SIZE // 2]
 
                 if self.stored_msg_ids:
                     if message.msg_id < self.stored_msg_ids[0]:
@@ -298,7 +319,11 @@ class AdBotSession(Session):
                             'synchronized.'
                         )
             except SecurityCheckMismatch as e:
-                log.warning('Discarding packet: %s', e)
+                log.warning(
+                    '[%s] Discarding packet: %s',
+                    self.client.phone_number,
+                    e,
+                )
                 return await self.connection.close()
             else:
                 insort(self.stored_msg_ids, message.msg_id)
@@ -336,7 +361,11 @@ class AdBotSession(Session):
                     self.results[msg_id].event.set()
 
         if len(self.pending_acks) >= self.ACKS_THRESHOLD:
-            log.debug(f'Send {len(self.pending_acks)} acks')
+            log.debug(
+                '[%s] Send %s acks',
+                self.client.phone_number,
+                len(self.pending_acks),
+            )
             with suppress(BaseException):
                 msg_ids = list(self.pending_acks)
                 await self.send(MsgsAck(msg_ids=msg_ids), wait_response=False)
@@ -352,7 +381,12 @@ class AdBotSession(Session):
             ):
                 if (date := getattr(update, 'date', None)) is None:
                     continue
-                log.info(f'GetDifference (pts={pts}, pts_count={pts_count})')
+                log.info(
+                    '[%s] GetDifference (pts=%s, pts_count=%s)',
+                    self.client.phone_number,
+                    pts,
+                    pts_count,
+                )
                 difference = await self.invoke(
                     GetDifference(pts=pts - pts_count, date=date, qts=-1)
                 )
@@ -432,6 +466,17 @@ class AdBotSession(Session):
                             is_private=is_private,
                         )
                     ):
+                        log.info(
+                            '[%s] Handling %s:%s with `%s` %s %s',
+                            self.client.phone_number,
+                            chat_id,
+                            message_id.id
+                            if isinstance(message_id, Message)
+                            else message_id,
+                            handler.callback_name,
+                            f'"{data}"' if data else '',
+                            f'query_id={query_id}' if query_id else '',
+                        )
                         r = self.client.Registry
                         phone_number = self.client.storage.phone_number
                         name = handler.callback_name
@@ -481,7 +526,7 @@ class AdBotSession(Session):
         )
 
     async def network_worker(self: Self, /) -> None:
-        log.info('NetworkTask started')
+        log.debug('[%s] NetworkTask started', self.client.phone_number)
 
         # def print_exception(task: Task, /) -> None:
         #     try:
@@ -493,14 +538,21 @@ class AdBotSession(Session):
             packet = await self.connection.recv()
             if packet is None or len(packet) == 4:
                 if packet:
-                    print(f"Server sent '{Int.read(BytesIO(packet))}'")
+                    log.debug(
+                        "[%s] Server sent '%s'",
+                        self.client.phone_number,
+                        Int.read(BytesIO(packet)),
+                    )
                 if self.is_started.is_set():
-                    await self.restart()
+                    self.client.loop.create_task(self.restart())
+
                 break
 
-            await self.client.storage.scoped(self.handle_packet)(packet)
+            self.client.loop.create_task(
+                self.client.storage.scoped(self.handle_packet)(packet)
+            )
 
-        log.info('NetworkTask stopped')
+        log.debug('[%s] NetworkTask stopped', self.client.phone_number)
 
     async def send(
         self: Self,
@@ -575,12 +627,14 @@ class AdBotSession(Session):
                     raise
 
                 log.warning(
-                    f'[{self.client.storage.phone_number}] Waiting for '
-                    f'{amount} seconds before continuing '
-                    f"(required by '{query}')"
+                    '[%s] Waiting for %s seconds before continuing '
+                    "(required by '%s')",
+                    self.client.storage.phone_number,
+                    amount,
+                    query,
                 )
 
-                await sleep(amount)
+                await asleep(amount)
             except (
                 OSError,
                 TimeoutError,
@@ -588,12 +642,15 @@ class AdBotSession(Session):
                 ServiceUnavailable,
             ) as e:
                 if retries <= 0:
-                    raise e from None
+                    raise
 
                 (log.warning if retries < 2 else log.info)(
-                    f'[{self.MAX_RETRIES - retries + 1}] Retrying '
-                    f"'{query}' due to {str(e) or repr(e)}'"
+                    '[%s:%s] Retrying `%s` due to %s...',
+                    self.client.phone_number,
+                    self.MAX_RETRIES - retries + 1,
+                    query,
+                    str(e) or repr(e),
                 )
 
-                await sleep(0.5)
+                await asleep(0.5)
                 return await self.invoke(data, retries - 1, timeout)
