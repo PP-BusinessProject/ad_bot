@@ -69,6 +69,16 @@ class StartMessage(object):
             self.storage.Session.add(user := UserModel(id=chat_id))
             await self.storage.Session.commit()
             self.logger.info(f'Registered user with id {user.id}')
+        elif user.is_subscribed and (
+            user.role not in {UserRole.SUPPORT, UserRole.ADMIN}
+        ):
+            return await self.bot_message(
+                chat_id=chat_id,
+                message_id=message_id,
+                data=Query(self.BOT.PAGE),
+                query_id=query_id,
+            )
+
         return await self.send_or_edit(
             *(chat_id, message_id),
             text='\n'.join(
@@ -100,20 +110,16 @@ class StartMessage(object):
                     [IKB('Мои боты', self.BOT.PAGE)],
                     [IKB('Текущие пользователи', self.BOT.LIST)],
                     [
-                        IKB('Добавить бота', self.SENDER_CLIENT._SELF),
-                        IKB('Список ботов', self.SENDER_CLIENT.LIST),
-                    ],
-                    [
-                        IKB('Добавить чаты', self.SENDER_CHAT._SELF),
-                        IKB('Список чатов', self.SENDER_CHAT.LIST),
+                        IKB('Добавить бота', self.CLIENT._SELF),
+                        IKB('Список ботов', self.CLIENT.LIST),
                     ],
                 ]
                 if user.role in {UserRole.SUPPORT, UserRole.ADMIN}
-                else [
-                    [IKB('Мои боты', self.BOT.PAGE)],
-                    [IKB('Связаться с администрацией', self.HELP._SELF)],
-                ]
-                if user.is_subscribed
+                # else [
+                #     [IKB('Мои боты', self.BOT.PAGE)],
+                #     [IKB('Связаться с администрацией', self.HELP._SELF)],
+                # ]
+                # if user.is_subscribed
                 else [
                     [IKB('Оставить заявку', self.SUBSCRIPTION._SELF)],
                     [IKB('Связаться с администрацией', self.HELP._SELF)],

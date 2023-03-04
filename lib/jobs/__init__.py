@@ -3,7 +3,8 @@
 from .notify_subscription_end_job import NotifySubscriptionEndJob
 from .sender_job import SenderJob
 from .warmup_job import WarmupJob
+from .checker_job import CheckerJob
 
 
-class Jobs(NotifySubscriptionEndJob, SenderJob, WarmupJob):
+class Jobs(CheckerJob, NotifySubscriptionEndJob, SenderJob, WarmupJob):
     pass

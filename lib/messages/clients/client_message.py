@@ -18,13 +18,12 @@ from sqlalchemy.sql.expression import exists, select, text
 from sqlalchemy.sql.functions import count
 
 from ...models._constraints import MAX_NAME_LENGTH
-from ...models.bots.chat_model import ChatModel
 from ...models.bots.client_model import ClientModel
+from ...models.clients.chat_model import ChatModel
 from ...models.clients.user_model import UserRole
 from ...models.misc.input_message_model import InputMessageModel
 from ...models.misc.input_model import InputModel
 from ...models.misc.settings_model import SettingsModel
-from ...utils.pyrogram import auto_init
 from ...utils.query import Query
 
 if TYPE_CHECKING:
@@ -93,7 +92,7 @@ class ClientMessage(object):
                                 )
                             ),
                             Query(
-                                self.SENDER_CLIENT.PAGE,
+                                self.CLIENT.PAGE,
                                 sender_phone_number,
                                 p=page_index,
                             ),
@@ -118,7 +117,7 @@ class ClientMessage(object):
                 + self.hpages(
                     page_index,
                     total_pages,
-                    Query(self.SENDER_CLIENT.LIST),
+                    Query(self.CLIENT.LIST),
                     kwarg='p',
                 )
                 + [[IKB('Назад', Query(self.SERVICE._SELF))]]
@@ -153,7 +152,7 @@ class ClientMessage(object):
         if isinstance(message_id, Message):
             message_id = message_id.id
 
-        if data is None or data.command == self.SENDER_CLIENT._SELF:
+        if data is None or data.command == self.CLIENT._SELF:
             if await self.storage.Session.scalar(
                 select(
                     exists(text('NULL')).where(InputModel.chat_id == chat_id)
@@ -167,19 +166,21 @@ class ClientMessage(object):
                 data=data,
                 on_response=self._add_client,
                 on_finished=self._add_client_on_finished,
-                user_role=UserRole.SUPPORT,
+                # user_role=UserRole.USER,
                 query_pattern='|'.join(
                     (
-                        self.SENDER_CLIENT.AUTH_SEND_SMS,
-                        self.SENDER_CLIENT.AUTH_RECOVER_PASSWORD,
-                        self.SENDER_CLIENT.AUTH_SKIP_LAST_NAME,
-                        self.SENDER_CLIENT.AUTH_REGISTER_APPROVE,
-                        self.SENDER_CLIENT.AUTH_REGISTER_RETRY,
+                        self.CLIENT.AUTH_SEND_SMS,
+                        self.CLIENT.AUTH_RECOVER_PASSWORD,
+                        self.CLIENT.AUTH_SKIP_LAST_NAME,
+                        self.CLIENT.AUTH_REGISTER_APPROVE,
+                        self.CLIENT.AUTH_REGISTER_RETRY,
                     )
                 ),
-                used_messages=[InputMessageModel(message_id=message_id)],
             )
             self.storage.Session.add(input)
+            self.storage.Session.add(
+                InputMessageModel(message_id=message_id, input=input)
+            )
             await self.storage.Session.commit()
             return await self.send_or_edit(
                 *(chat_id, message_id),
@@ -195,56 +196,60 @@ class ClientMessage(object):
                 await self.delete_messages(chat_id, message_id)
             return await abort('Бот не найден.')
 
-        elif data.command == self.SENDER_CLIENT.REFRESH:
-            sender_client = self.get_worker(sender.phone_number)
-            if not await sender_client.validate():
+        elif data.command == self.CLIENT.REFRESH:
+            try:
+                async with self.worker(sender.phone_number) as worker:
+                    me = await worker.get_me()
+            except BaseException as _:
                 return await abort('Не удалось обновить статус бота.')
 
-            async with auto_init(sender_client):
-                me = await sender_client.get_me()
             sender.restricted = me.is_restricted
             sender.scam = me.is_scam
             sender.fake = me.is_fake
             sender.deleted = me.is_deleted
             await self.storage.Session.commit()
 
-        elif data.command == self.SENDER_CLIENT.ACTIVE:
-            if sender.active or (
-                await self.get_worker(sender.phone_number).validate()
-            ):
-                sender.active = not sender.active
-                await self.storage.Session.commit()
-            else:
-                return await abort(
-                    'Бот не валиден. Повторите попытку еще раз.'
-                )
+        elif data.command == self.CLIENT.ACTIVE:
+            async with self.worker(
+                sender.phone_number,
+                start=False,
+                stop=False,
+            ) as worker:
+                if sender.active or await worker.validate():
+                    sender.active = not sender.active
+                    await self.storage.Session.commit()
+                else:
+                    return await abort(
+                        'Бот не валиден. Повторите попытку еще раз.'
+                    )
 
-        elif data.command == self.SENDER_CLIENT.WARMUP:
+        elif data.command == self.CLIENT.WARMUP:
             sender.warmup = not sender.warmup
             await self.storage.Session.commit()
 
-        elif data.command == self.SENDER_CLIENT.WARMUP_STATUS:
-            sender_client = self.get_worker(sender.phone_number)
-            if not await sender_client.validate():
-                return await abort(
-                    'Не удалось получить статус прогрева для бота.'
-                )
-
+        elif data.command == self.CLIENT.WARMUP_STATUS:
             chat_ids: list[int] = await self.storage.Session.scalars(
                 select(ChatModel.id)
             )
             if not (chat_ids := chat_ids.all()):
                 return await abort('Нет чатов для прогрева.')
 
-            async with auto_init(sender_client):
-                chat_dialogs = await sender_client.get_peer_dialogs(chat_ids)
-                valid = sum(d.top_message is not None for d in chat_dialogs)
-                word = self.morph.plural(len(chat_ids), 'чат', case='gent')
+            try:
+                async with self.worker(sender.phone_number) as worker:
+                    chat_dialogs = await worker.get_peer_dialogs(chat_ids)
+                    valid = sum(
+                        d.top_message is not None for d in chat_dialogs
+                    )
+                    word = self.morph.plural(len(chat_ids), 'чат', case='gent')
+                    return await abort(
+                        f'Прогрето {valid} из {len(chat_ids)} {word}.'
+                    )
+            except BaseException as _:
                 return await abort(
-                    f'Прогрето {valid} из {len(chat_ids)} {word}.'
+                    'Не удалось получить статус прогрева для бота.'
                 )
 
-        elif data.command == self.SENDER_CLIENT.DELETE:
+        elif data.command == self.CLIENT.DELETE:
             await self.storage.Session.delete(sender)
             await self.storage.Session.commit()
             return await self.clients_list(chat_id, message_id, data, query_id)
@@ -315,28 +320,28 @@ class ClientMessage(object):
             reply_markup=IKM(
                 [
                     [
-                        IKB('Обновить', data(self.SENDER_CLIENT.REFRESH)),
+                        IKB('Обновить', data(self.CLIENT.REFRESH)),
                         IKB(
                             'Выключить для рассылки'
                             if sender.active
                             else 'Включить для рассылки',
-                            data(self.SENDER_CLIENT.ACTIVE),
+                            data(self.CLIENT.ACTIVE),
                         ),
                     ],
                     [
                         IKB(
                             'Статус прогрева',
-                            data(self.SENDER_CLIENT.WARMUP_STATUS),
+                            data(self.CLIENT.WARMUP_STATUS),
                         ),
                         IKB(
                             'Отключить прогрев'
                             if sender.warmup
                             else 'Включить прогрев',
-                            data(self.SENDER_CLIENT.WARMUP),
+                            data(self.CLIENT.WARMUP),
                         ),
                     ],
-                    [IKB('Удалить бота', data(self.SENDER_CLIENT.DELETE))],
-                    [IKB('Назад', data(self.SENDER_CLIENT.LIST))],
+                    [IKB('Удалить бота', data(self.CLIENT.DELETE))],
+                    [IKB('Назад', data(self.CLIENT.LIST))],
                 ]
             ),
         )
@@ -414,19 +419,17 @@ class ClientMessage(object):
             )
         input, chat_id = chat_id, chat_id.chat_id
 
-        sender, phone_number = None, input.data.kwargs.get('phone_number')
-        if isinstance(phone_number, int):
-            sender = self.get_worker(phone_number)
+        phone_number = input.data.kwargs.get('phone_number')
 
         # MIDSTEPS: OR
         if data is not None:
             # STEP 3.3.2.1: Restore the client's password
-            if data.command == self.SENDER_CLIENT.AUTH_RECOVER_PASSWORD:
+            if data.command == self.CLIENT.AUTH_RECOVER_PASSWORD:
                 try:
-                    async with auto_init(
-                        sender, only_connect=True, stop=False
-                    ):
-                        modify_kwargs(email=await sender.send_recovery_code())
+                    async with self.worker(
+                        phone_number, only_connect=True, stop=False
+                    ) as worker:
+                        modify_kwargs(email=await worker.send_recovery_code())
                         await self.storage.Session.commit()
                 except BadRequest:
                     return await abort(
@@ -451,13 +454,13 @@ class ClientMessage(object):
             elif 'phone_code_type' in input.data.kwargs and (
                 'phone_code_hash' in input.data.kwargs
                 and input.data.kwargs['phone_code_type'] != 'sms'
-                and data.command == self.SENDER_CLIENT.AUTH_SEND_SMS
+                and data.command == self.CLIENT.AUTH_SEND_SMS
             ):
                 try:
-                    async with auto_init(
-                        sender, only_connect=True, stop=False
-                    ):
-                        sent_code = await sender.resend_code(
+                    async with self.worker(
+                        phone_number, only_connect=True, stop=False
+                    ) as worker:
+                        sent_code = await worker.resend_code(
                             str(input.data.kwargs['phone_number']),
                             input.data.kwargs['phone_code_hash'],
                         )
@@ -487,7 +490,7 @@ class ClientMessage(object):
                     )
 
             # STEP 4.2: Skip entering the Last Name
-            elif data.command == self.SENDER_CLIENT.AUTH_SKIP_LAST_NAME:
+            elif data.command == self.CLIENT.AUTH_SKIP_LAST_NAME:
                 name_message = await self.send_message(
                     chat_id,
                     '\n'.join(
@@ -506,13 +509,13 @@ class ClientMessage(object):
                             [
                                 IKB(
                                     'Подтвердить',
-                                    self.SENDER_CLIENT.AUTH_REGISTER_APPROVE,
+                                    self.CLIENT.AUTH_REGISTER_APPROVE,
                                 )
                             ],
                             [
                                 IKB(
                                     'Заполнить заново',
-                                    self.SENDER_CLIENT.AUTH_REGISTER_RETRY,
+                                    self.CLIENT.AUTH_REGISTER_RETRY,
                                 )
                             ],
                         ]
@@ -531,7 +534,7 @@ class ClientMessage(object):
                     )
 
             # STEP 4.4: Enter the name again
-            elif data.command == self.SENDER_CLIENT.AUTH_REGISTER_RETRY:
+            elif data.command == self.CLIENT.AUTH_REGISTER_RETRY:
                 modify_kwargs('first_name', 'last_name', 'ln_msg_id')
                 message = self.answer_edit_send(
                     chat_id=input.chat_id,
@@ -544,12 +547,12 @@ class ClientMessage(object):
                 await self.storage.Session.commit()
 
             # STEP 4.5: Register the client with the given name and last_name
-            elif data.command == self.SENDER_CLIENT.AUTH_REGISTER_APPROVE:
+            elif data.command == self.CLIENT.AUTH_REGISTER_APPROVE:
                 try:
-                    async with auto_init(
-                        sender, only_connect=True, stop=False
-                    ):
-                        await sender.sign_up(
+                    async with self.worker(
+                        phone_number, only_connect=True, stop=False
+                    ) as worker:
+                        await worker.sign_up(
                             str(input.data.kwargs['phone_number']),
                             input.data.kwargs['phone_code_hash'],
                             input.data.kwargs['first_name'],
@@ -558,7 +561,7 @@ class ClientMessage(object):
 
                         tos_id = input.data.kwargs.get('tos_id')
                         if isinstance(tos_id, str):
-                            return await sender.accept_terms_of_service(tos_id)
+                            return await worker.accept_terms_of_service(tos_id)
                     return await abort('Произошла ошибка. Попробуйте еще раз.')
                 except BadRequest:
                     return await abort(
@@ -587,89 +590,93 @@ class ClientMessage(object):
             modify_kwargs(phone_number=phone_number)
 
             # STEP 2: Initialize a client
-            sender = self.get_worker(phone_number)
-
-            # STEP 2.1: Validate a client
-            if await sender.validate():
-                # STEP 2.1.2: Add a client to the database
-                if await self.storage.Session.scalar(
-                    select(
-                        ~exists(text('NULL')).where(
-                            ClientModel.phone_number == phone_number
+            async with self.worker(
+                phone_number,
+                start=False,
+                stop=False,
+            ) as worker:
+                # STEP 2.1: Validate a client
+                if await worker.validate():
+                    # STEP 2.1.2: Add a client to the database
+                    if await self.storage.Session.scalar(
+                        select(
+                            ~exists(text('NULL')).where(
+                                ClientModel.phone_number == phone_number
+                            )
                         )
-                    )
-                ):
-                    return True
-
-                # STEP 2.1.1: Ask for another client
-                return await abort(
-                    'Этот клиент уже используется. Попробуйте еще раз.',
-                    add=True,
-                )
-
-            # STEP 3: Receive a confirmation code in the app
-            else:
-                try:
-                    async with auto_init(
-                        sender, only_connect=True, stop=False
                     ):
-                        try:
-                            sent_code = await sender.send_code(
-                                str(phone_number)
-                            )
-                        except PhoneNumberInvalid:
-                            return await abort(
-                                'Получен неккоректный номер телефона. '
-                                'Попробуйте еще раз.',
-                                add=True,
-                            )
+                        return True
 
-                    sms_msg = await self.send_message(
-                        chat_id,
-                        '\n'.join(
-                            (
-                                f'На номер {phone_number} было отправлено '
-                                'сообщение с кодом авторизации.',
-                                'Пришлите его в сообщении ниже.',
-                            )
-                        ),
-                        reply_markup=IKM(
-                            [
-                                [
-                                    IKB(
-                                        'Отправить код с помощью смс',
-                                        self.SENDER_CLIENT.AUTH_SEND_SMS,
-                                    )
-                                ]
-                            ]
-                        ),
-                    )
-                    used_sms_msg = InputMessageModel.from_message(
-                        sms_msg, input
-                    )
-                    self.storage.Session.add(used_sms_msg)
-                    modify_kwargs(
-                        phone_code_type=sent_code.type,
-                        phone_code_hash=sent_code.phone_code_hash,
-                        sms_msg_id=sms_msg.id,
-                    )
-                    await self.storage.Session.commit()
-                except (BadRequest, ConnectionError) as _:
+                    # STEP 2.1.1: Ask for another client
                     return await abort(
-                        '\n'.join(
-                            (
-                                'Ошибка при отправке кода авторизации.',
-                                'Возможно введен некорректный номер телефона.',
-                                'Попробуйте ввести номер телефона еще раз.',
+                        'Этот клиент уже используется. Попробуйте еще раз.',
+                        add=True,
+                    )
+
+                # STEP 3: Receive a confirmation code in the app
+                else:
+                    try:
+                        async with self.worker(
+                            phone_number, only_connect=True, stop=False
+                        ) as worker:
+                            try:
+                                sent_code = await worker.send_code(
+                                    str(phone_number)
+                                )
+                            except PhoneNumberInvalid:
+                                return await abort(
+                                    'Получен неккоректный номер телефона. '
+                                    'Попробуйте еще раз.',
+                                    add=True,
+                                )
+
+                        sms_msg = await self.send_message(
+                            chat_id,
+                            '\n'.join(
+                                (
+                                    f'На номер {phone_number} было отправлено '
+                                    'сообщение с кодом авторизации.',
+                                    'Пришлите его в сообщении ниже.',
+                                )
+                            ),
+                            reply_markup=IKM(
+                                [
+                                    [
+                                        IKB(
+                                            'Отправить код с помощью смс',
+                                            self.CLIENT.AUTH_SEND_SMS,
+                                        )
+                                    ]
+                                ]
+                            ),
+                        )
+                        used_sms_msg = InputMessageModel.from_message(
+                            sms_msg, input
+                        )
+                        self.storage.Session.add(used_sms_msg)
+                        modify_kwargs(
+                            phone_code_type=sent_code.type,
+                            phone_code_hash=sent_code.phone_code_hash,
+                            sms_msg_id=sms_msg.id,
+                        )
+                        await self.storage.Session.commit()
+                    except (BadRequest, ConnectionError) as _:
+                        return await abort(
+                            '\n'.join(
+                                (
+                                    'Ошибка при отправке кода авторизации.',
+                                    'Возможно введен некорректный номер телефона.',
+                                    'Попробуйте ввести номер телефона еще раз.',
+                                )
                             )
                         )
-                    )
-                except FloodWait as e:
-                    return await abort(
-                        'Перед следующей попыткой входа по номеру '
-                        f'{phone_number} необходимо подождать еще '
-                        '__%s__.' % self.morph.timedelta(e.value, case='gent')
-                    )
+                    except FloodWait as e:
+                        return await abort(
+                            'Перед следующей попыткой входа по номеру '
+                            f'{phone_number} необходимо подождать еще '
+                            '__%s__.'
+                            % self.morph.timedelta(e.value, case='gent')
+                        )
             return False
 
         # STEP 4: Register a client
@@ -698,7 +705,7 @@ class ClientMessage(object):
                             [
                                 IKB(
                                     'Пропустить',
-                                    self.SENDER_CLIENT.AUTH_SKIP_LAST_NAME,
+                                    self.CLIENT.AUTH_SKIP_LAST_NAME,
                                 )
                             ]
                         ]
@@ -741,13 +748,13 @@ class ClientMessage(object):
                             [
                                 IKB(
                                     'Подтвердить',
-                                    self.SENDER_CLIENT.AUTH_REGISTER_APPROVE,
+                                    self.CLIENT.AUTH_REGISTER_APPROVE,
                                 )
                             ],
                             [
                                 IKB(
                                     'Заполнить заново',
-                                    self.SENDER_CLIENT.AUTH_REGISTER_RETRY,
+                                    self.CLIENT.AUTH_REGISTER_RETRY,
                                 )
                             ],
                         ]
@@ -771,8 +778,10 @@ class ClientMessage(object):
                 if not isinstance(message_id, Message):
                     message_id = await self.get_messages(chat_id, message_id)
                 recovery_code = int(sub(r'\s+', '', message_id.text))
-                async with auto_init(sender, only_connect=True, stop=False):
-                    await sender.recover_password(recovery_code)
+                async with self.worker(
+                    phone_number, only_connect=True, stop=False
+                ) as worker:
+                    await worker.recover_password(recovery_code)
                 return True
             except (BadRequest, ValueError):
                 return await abort(
@@ -790,8 +799,10 @@ class ClientMessage(object):
             if not isinstance(message_id, Message):
                 message_id = await self.get_messages(chat_id, message_id)
             try:
-                async with auto_init(sender, only_connect=True, stop=False):
-                    return bool(await sender.check_password(message_id.text))
+                async with self.worker(
+                    phone_number, only_connect=True, stop=False
+                ) as worker:
+                    return bool(await worker.check_password(message_id.text))
             except BadRequest:
                 return await abort(
                     '\n'.join(
@@ -811,8 +822,10 @@ class ClientMessage(object):
                 phone_code = int(sub(r'\D', '', message_id.text))
 
                 # STEP 3.2: Authorize a client
-                async with auto_init(sender, only_connect=True, stop=False):
-                    signed_in = await sender.sign_in(
+                async with self.worker(
+                    phone_number, only_connect=True, stop=False
+                ) as worker:
+                    signed_in = await worker.sign_in(
                         str(input.data.kwargs['phone_number']),
                         input.data.kwargs['phone_code_hash'],
                         str(phone_code),
@@ -841,9 +854,11 @@ class ClientMessage(object):
 
             # STEP 3.3: Check for the client's password
             except SessionPasswordNeeded as e:
-                recover_code = self.SENDER_CLIENT.AUTH_RECOVER_PASSWORD
-                async with auto_init(sender, only_connect=True, stop=False):
-                    password_hint = await sender.get_password_hint()
+                recover_code = self.CLIENT.AUTH_RECOVER_PASSWORD
+                async with self.worker(
+                    phone_number, only_connect=True, stop=False
+                ) as worker:
+                    password_hint = await worker.get_password_hint()
                 email_msg = await self.send_message(
                     chat_id,
                     '\n'.join(
@@ -905,22 +920,25 @@ class ClientMessage(object):
         input, chat_id = chat_id, chat_id.chat_id
         phone_number = input.data.kwargs.get('phone_number')
         if not input.success:
-            if query_id is None:
-                with suppress(RPCError):
-                    await self.delete_messages(input.chat_id, input.message_id)
-                return await abort('Добавление бота отменено.')
+            async with self.worker(phone_number, start=False, stop=True):
+                if query_id is None:
+                    with suppress(RPCError):
+                        await self.delete_messages(
+                            input.chat_id, input.message_id
+                        )
+                    return await abort('Добавление бота отменено.')
         elif isinstance(phone_number, int):
-            worker = self.get_worker(phone_number)
-            async with auto_init(worker, start=False, stop=True):
-                pass
-            if await worker.validate():
-                await self.storage.Session.merge(
-                    ClientModel(phone_number=phone_number)
-                )
-                await self.storage.Session.commit()
-                await abort(
-                    f'Бот под номером {phone_number} был успешно добавлен.'
-                )
-            else:
-                await worker.storage.delete()
+            async with self.worker(
+                phone_number, start=False, stop=True
+            ) as worker:
+                if await worker.validate():
+                    await self.storage.Session.merge(
+                        ClientModel(phone_number=phone_number)
+                    )
+                    await self.storage.Session.commit()
+                    await abort(
+                        f'Бот под номером {phone_number} был успешно добавлен.'
+                    )
+                else:
+                    await worker.storage.delete()
         return await self.start_message(input, None, data, query_id)

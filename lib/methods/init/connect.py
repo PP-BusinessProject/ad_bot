@@ -23,13 +23,14 @@ class Connect(object):
             client.
         """
         await self.storage.open()
-        session = await self.storage._get_session()
-        self.session = AdBotSession(
-            self,
-            session.dc_id,
-            session.test_mode,
-            session.auth_key,
-        )
+        if getattr(self, 'session', None) is None:
+            session = await self.storage._get_session()
+            self.session = AdBotSession(
+                self,
+                session.dc_id,
+                session.test_mode,
+                session.auth_key,
+            )
         await self.session.start()
         self.is_connected = True
         return bool(await self.storage.user_id())

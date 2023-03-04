@@ -85,7 +85,9 @@ class IterDialogs(object):
                 if not isinstance(dialog, RawDialog):
                     dialog = None
                     continue
+                peer = dialog.peer
                 dialog = Dialog._parse(self, dialog, messages, users, chats)
+                dialog.peer = peer
                 yield dialog
                 if (current := current + 1) >= total:
                     break

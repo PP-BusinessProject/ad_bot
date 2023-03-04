@@ -3,9 +3,11 @@
 from re import sub
 from typing import TYPE_CHECKING, Union
 
-from pyrogram.errors.exceptions.bad_request_400 import (BadRequest,
-                                                        ChannelInvalid,
-                                                        PeerIdInvalid)
+from pyrogram.errors.exceptions.bad_request_400 import (
+    BadRequest,
+    ChannelInvalid,
+    PeerIdInvalid,
+)
 from pyrogram.raw.functions.channels.get_channels import GetChannels
 from pyrogram.raw.functions.contacts.resolve_username import ResolveUsername
 from pyrogram.raw.functions.messages.get_chats import GetChats
@@ -25,6 +27,9 @@ from pyrogram.raw.types.user import User as RawUser
 from pyrogram.types.user_and_chats.chat import Chat
 from pyrogram.types.user_and_chats.user import User
 from pyrogram.utils import get_channel_id, get_peer_type
+
+from ...models.sessions.peer_model import PeerModel
+from ...utils.pyrogram import get_input_peer
 
 if TYPE_CHECKING:
     from ...ad_bot_client import AdBotClient
@@ -62,7 +67,9 @@ class ResolvePeer(object):
         Raises:
             KeyError: In case the peer doesn't exist in the internal database.
         """
-        if isinstance(
+        if isinstance(peer_id, PeerModel):
+            return get_input_peer(peer_id)
+        elif isinstance(
             peer_id,
             (InputPeerChannel, InputPeerChat, InputPeerUser),
         ):

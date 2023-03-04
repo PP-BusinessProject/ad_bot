@@ -4,22 +4,23 @@ from hashlib import sha1
 from io import BytesIO
 from os import urandom
 from time import monotonic, time
-from typing import ClassVar, Final, Self
+from typing import Final, Self
 
 from pyrogram import raw
-from pyrogram.connection.connection import Connection
 from pyrogram.crypto import aes, prime, rsa
 from pyrogram.errors import SecurityCheckMismatch
 from pyrogram.raw.core import Int, Long, TLObject
 from pyrogram.session.auth import Auth, log
 from pyrogram.session.internals import MsgId
 
+from .ad_bot_connection import AdBotConnection
+
 
 @dataclass(init=False, frozen=True)
 class AdBotAuth(Auth):
-    connection: Final[Connection]
+    connection: Final[AdBotConnection]
 
-    def __init__(self: Self, /, connection: Connection) -> None:
+    def __init__(self: Self, /, connection: AdBotConnection) -> None:
         object.__setattr__(self, 'connection', connection)
 
     @staticmethod
@@ -51,11 +52,6 @@ class AdBotAuth(Auth):
         # If that happens, just try again up to MAX_RETRIES times.
         while True:
             try:
-                log.info(
-                    'Start creating a new auth key on DC%s',
-                    self.connection.dc_id,
-                )
-
                 # Step 1; Step 2
                 nonce = int.from_bytes(urandom(16), 'little', signed=True)
                 log.debug('Send req_pq: %s', nonce)

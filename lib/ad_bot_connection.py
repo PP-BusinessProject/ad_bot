@@ -1,9 +1,9 @@
-from typing import TYPE_CHECKING, Optional, Final, Self
 from asyncio import sleep as asleep
 from logging import getLogger
+from typing import TYPE_CHECKING, Final, Optional, Self
+
 from pyrogram.connection.transport import TCP, TCPAbridged
 from pyrogram.session.internals import DataCenter
-from pyrogram.connection.connection import Connection
 
 if TYPE_CHECKING:
     from .ad_bot_client import AdBotClient

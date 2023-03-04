@@ -21,9 +21,6 @@ class Initialize(object):
             client.
         """
         self.load_plugins()
-        if getattr(self, 'username', None) is None or (
-            getattr(self, 'is_bot', None) is None
-        ):
-            me = await self.get_me()
-            self.username, self.is_bot = me.username, me.is_bot
+        if getattr(self, 'is_bot', None) is None:
+            self.is_bot = await self.storage.is_bot()
         self.is_initialized = True

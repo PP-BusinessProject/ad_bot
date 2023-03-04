@@ -21,6 +21,8 @@ class GetPeerDialogs(object):
         self: Self,
         chats: Union[int, str, Chat],
         /,
+        *,
+        fetch_peers: bool = True,
     ) -> Optional[Dialog]:
         pass
 
@@ -29,6 +31,8 @@ class GetPeerDialogs(object):
         self: Self,
         chats: Iterable[Union[int, str, Chat]],
         /,
+        *,
+        fetch_peers: bool = True,
     ) -> list[Dialog]:
         pass
 
@@ -36,6 +40,8 @@ class GetPeerDialogs(object):
         self: 'AdBotClient',
         chats: Union[int, str, Chat, Iterable[Union[int, str, Chat]]],
         /,
+        *,
+        fetch_peers: bool = True,
     ) -> Union[Optional[Dialog], list[Dialog]]:
         """
         Return the list of dialogs for the specified `chats`.
@@ -65,13 +71,14 @@ class GetPeerDialogs(object):
         ]
 
         response: PeerDialogs = await self.invoke(
-            RawGetPeerDialogs(peers=chat_peers)
+            RawGetPeerDialogs(peers=chat_peers),
+            fetch_peers=fetch_peers,
         )
         users = {user.id: user for user in response.users}
         chats = {chat.id: chat for chat in response.chats}
         messages = {
             get_peer_id(message.peer_id): await Message._parse(
-                self, message, users, chats
+                self, message, users, chats, replies=0
             )
             for message in response.messages
             if not isinstance(message, MessageEmpty)

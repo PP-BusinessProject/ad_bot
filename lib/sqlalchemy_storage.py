@@ -49,6 +49,13 @@ from .utils.pyrogram import get_input_peer
 #
 P = ParamSpec('P')
 T = TypeVar('T')
+Bind = Union[
+    Union[scoped_session, SyncSession, Connection, Engine],
+    async_scoped_session,
+    AsyncSession,
+    AsyncConnection,
+    AsyncEngine,
+]
 
 
 @dataclass(init=False, frozen=True)
@@ -75,13 +82,7 @@ class SQLAlchemyStorage(Storage):
         /,
         phone_number: int,
         api_id: int,
-        bind: Union[
-            Union[scoped_session, SyncSession, Connection, Engine],
-            async_scoped_session,
-            AsyncSession,
-            AsyncConnection,
-            AsyncEngine,
-        ],
+        bind: Bind,
         metadata: MetaData,
     ) -> None:
         if not isinstance(metadata, MetaData):

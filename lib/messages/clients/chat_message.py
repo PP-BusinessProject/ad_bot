@@ -2,34 +2,41 @@
 
 from asyncio import sleep
 from contextlib import suppress
-from datetime import timedelta
+from datetime import datetime, timedelta
 from multiprocessing import Value
 from multiprocessing.managers import ValueProxy
 from time import monotonic
 from typing import TYPE_CHECKING, Any, Optional, Union
 
 from apscheduler.jobstores.base import JobLookupError
+from dateutil.tz.tz import tzlocal
 from pyrogram.errors import FloodWait
 from pyrogram.errors.rpc_error import RPCError
 from pyrogram.types import InlineKeyboardButton as IKB
 from pyrogram.types import InlineKeyboardMarkup as IKM
 from pyrogram.types import Message
 from pyrogram.types.user_and_chats.chat import Chat
+from sqlalchemy.orm.strategy_options import contains_eager, joinedload
+from sqlalchemy.orm.util import with_parent
 from sqlalchemy.sql.expression import exists, select, text
 from sqlalchemy.sql.functions import count
 
 from ...methods.chats.check_chats import CheckChatsFloodWait
-from ...models.bots.chat_model import ChatDeactivatedCause as CHAT_DEACTIVATED
-from ...models.bots.chat_model import ChatModel
 from ...models.bots.client_model import ClientModel
+from ...models.clients.ad_chat_message_model import AdChatMessageModel
+from ...models.clients.ad_chat_model import AdChatModel
+from ...models.clients.ad_chat_model import (
+    ChatDeactivatedCause as CHAT_DEACTIVATED,
+)
+from ...models.clients.ad_model import AdModel
+from ...models.clients.chat_model import ChatModel
 from ...models.clients.user_model import UserRole
-from ...models.misc.category_model import CategoryModel
 from ...models.misc.input_message_model import InputMessageModel
 from ...models.misc.input_model import InputModel
 from ...models.misc.settings_model import SettingsModel
 from ...models.sessions.session_model import SessionModel
-from ...utils.pyrogram import auto_init
 from ...utils.query import Query
+from .utils import message_header
 
 if TYPE_CHECKING:
     from ...ad_bot_client import AdBotClient
@@ -85,15 +92,20 @@ class ChatMessage(object):
         if isinstance(message_id, Message):
             message_id = message_id.id
 
-        page_index: int = data.kwargs.get('p') if data is not None else None
+        page_index = data.kwargs.get('c_p') if data is not None else 0
         if not isinstance(page_index, int):
             page_index = 0
+        ad = await self.storage.Session.get(AdModel, data.args)
+        if ad is None:
+            return await abort('Обьявление не существует.')
 
         chats_count: int = await self.storage.Session.scalar(
-            select(count()).select_from(ChatModel)
+            select(count()).where(with_parent(ad, AdModel.chats))
         )
         if not chats_count:
-            return await abort('На данный момент нет чатов для рассылки.')
+            return await abort(
+                'На данный момент нет чатов для рассылки этого обьявления.'
+            )
 
         page_list_size: int = await self.storage.Session.scalar(
             select(SettingsModel.page_list_size).where(
@@ -103,7 +115,8 @@ class ChatMessage(object):
         total_pages: int = -(-chats_count // page_list_size)
         return await self.send_or_edit(
             *(chat_id, message_id),
-            text='Список чатов для рассылки. Всего {count} {word}.'.format(
+            text='Список чатов для рассылки обьявления.'
+            '\nВсего {count} {word}.'.format(
                 count=chats_count,
                 word=self.morph.plural(chats_count, 'чат'),
             ),
@@ -111,25 +124,39 @@ class ChatMessage(object):
                 self.hpages(
                     page_index,
                     total_pages,
-                    Query(self.SENDER_CHAT.LIST),
-                    kwarg='p',
+                    Query(
+                        self.CHAT.LIST,
+                        ad.chat_id,
+                        ad.message_id,
+                        c_p=page_index,
+                        # kwargs=data.kwargs if data is not None else None,
+                    ),
+                    kwarg='c_p',
                 )
                 + [
                     [
                         IKB(
                             ' '.join(
-                                (chat.title, '✅' if chat.active else '❌')
+                                (
+                                    ad_chat.chat.title,
+                                    '✅' if ad_chat.active else '❌',
+                                )
                             ),
                             Query(
-                                self.SENDER_CHAT.PAGE, chat.id, p=page_index
+                                self.CHAT.PAGE,
+                                *data.args,
+                                ad_chat.chat_id,
+                                c_p=page_index,
                             ),
                         )
                     ]
-                    for chat in (
+                    for ad_chat in (
                         await self.storage.Session.scalars(
-                            select(ChatModel)
+                            select(AdChatModel)
+                            .join(AdChatModel.chat)
+                            .where(with_parent(ad, AdModel.chats))
                             .order_by(
-                                ChatModel.created_at.desc(),
+                                AdChatModel.created_at.desc(),
                                 ChatModel.title,
                             )
                             .slice(
@@ -138,10 +165,11 @@ class ChatMessage(object):
                                 min(page_index + 1, total_pages)
                                 * page_list_size,
                             )
+                            .options(contains_eager(AdChatModel.chat))
                         )
                     ).all()
                 ]
-                + [[IKB('Назад', Query(self.SERVICE._SELF))]]
+                + [[IKB('Назад', data(self.AD.PAGE))]]
             ),
         )
 
@@ -179,78 +207,46 @@ class ChatMessage(object):
             if input.message_id is not None:
                 message_id = input.message_id
             if input.data is not None:
-                data = input.data(self.SENDER_CHAT.PAGE)
+                data = input.data(self.CHAT.PAGE)
 
-        if data is None or data.command in (
-            self.SENDER_CHAT._SELF,
-            self.SENDER_CHAT.CATEGORY,
-        ):
+        if data is None or data.command == self.CHAT._SELF:
             if data is None:
-                data = Query(self.SENDER_CHAT._SELF)
-            result = await self.category_message(
-                *(chat_id, message_id, data, query_id),
-                prefix_text='\n'.join(
-                    (
-                        'Работа осуществляется в 3 этапа:',
-                        '1. Выбор категории для чатов.',
-                        '2. Присылание списка чатов. Чаты должны быть '
-                        'присланы построчно, возможно по несколько ссылок '
-                        'к одному чату на строке.',
-                        '3. Получение чатов и обновление в базе.',
-                    )
-                ),
-                cancel_command=self.SERVICE._SELF
-                if data is None or data.command == self.SENDER_CHAT._SELF
-                else self.SENDER_CHAT.PAGE,
+                data = Query(self.CHAT._SELF)
+
+            message = await self.send_or_edit(
+                *(chat_id, message_id),
+                'Пришлите список чатов для рассылки по данному обьявлению.',
+                reply_markup=IKM([[IKB('Отменить', self.INPUT.CANCEL)]]),
             )
-            if not isinstance(result, CategoryModel):
-                return result
-            data = data.__copy__(kwargs=dict(category_id=result.id))
 
-            if data.command == self.SENDER_CHAT._SELF:
-                _type = InputModel.on_response.type
-                check_func = _type.process_bind_param(self._add_chats)
-                if await self.storage.Session.scalar(
-                    select(
-                        exists(text('NULL')).where(
-                            InputModel.on_response == check_func
-                        )
-                    )
-                ):
-                    return await abort(
-                        'Другой пользователь уже добавляет чаты.'
-                    )
-                input = await self.storage.Session.get(InputModel, chat_id)
-                if input is None:
-                    input = InputModel(
-                        chat_id=chat_id,
-                        message_id=message_id,
-                        data=data,
-                        query_pattern=self.SENDER_CHAT.REFRESH.value,
-                        on_response=self._add_chats,
-                        on_finished=self._add_chats_on_finished,
-                        user_role=UserRole.SUPPORT,
-                        do_add_message=False,
-                    )
-                    self.storage.Session.add(input)
-                    await self.storage.Session.commit()
-                return await self._add_chats(
-                    input, message_id, Query(self.SENDER_CHAT.REFRESH)
+            input = await self.storage.Session.get(InputModel, chat_id)
+            if input is None:
+                input = InputModel(
+                    chat_id=chat_id,
+                    message_id=message_id,
+                    data=data,
+                    query_pattern=self.CHAT.REFRESH.value,
+                    on_response=self._add_chats,
+                    on_finished=self._add_chats_on_finished,
+                    user_role=UserRole.USER,
+                    do_add_message=False,
                 )
+                self.storage.Session.add(input)
+                self.storage.Session.add(
+                    InputMessageModel.from_message(message, input)
+                )
+                await self.storage.Session.commit()
+            return await self._add_chats(
+                input,
+                message_id,
+                data(self.CHAT.REFRESH),
+            )
 
-        chat: ChatModel = await self.storage.Session.get(ChatModel, data.args)
-        if chat is None:
+        ad_chat = await self.storage.Session.get(AdChatModel, data.args)
+        if ad_chat is None:
             return await abort('Чат не найден.')
 
-        elif data.command == self.SENDER_CHAT.CATEGORY:
-            chat.category_id = result.id
-            await self.storage.Session.commit()
-
-        elif data.command == self.SENDER_CHAT.REMOVE_CATEGORY:
-            chat.category_id = None
-            await self.storage.Session.commit()
-
-        elif data.command == self.SENDER_CHAT.REFRESH:
+        elif data.command == self.CHAT.REFRESH:
             workers_flood: dict[int, float] = {}
             phone_numbers = await self.storage.Session.scalars(
                 select(ClientModel.phone_number)
@@ -265,13 +261,15 @@ class ChatMessage(object):
                 .order_by(ClientModel.created_at)
             )
             for phone_number in phone_numbers.all():
-                async with auto_init(self.get_worker(phone_number)) as worker:
+                async with self.worker(phone_number) as worker:
                     try:
                         _chat = await worker.check_chats(
                             (
-                                chat.id,
-                                chat.invite_link,
-                                f'@{chat.username}' if chat.username else None,
+                                ad_chat.chat_id,
+                                ad_chat.chat.invite_link,
+                                f'@{ad_chat.chat.username}'
+                                if ad_chat.chat.username
+                                else None,
                             ),
                             folder_id=1,
                         )
@@ -295,21 +293,21 @@ class ChatMessage(object):
                     '__%s__.' % self.morph.timedelta(flood)
                 )
 
-            chat.title = _chat.title
-            chat.description = _chat.description
+            ad_chat.chat.title = _chat.title
+            ad_chat.chat.description = _chat.description
             await self.storage.Session.commit()
 
-        elif data.command == self.SENDER_CHAT.ACTIVATE:
-            if not chat.active:
-                chat.deactivated_cause = None
-            chat.active = not chat.active
+        elif data.command == self.CHAT.ACTIVATE:
+            if not ad_chat.active:
+                ad_chat.deactivated_cause = None
+            ad_chat.active = not ad_chat.active
             await self.storage.Session.commit()
 
-        elif data.command == self.SENDER_CHAT.PERIOD_RESET:
-            chat.period = ChatModel.period.default.arg
+        elif data.command == self.CHAT.PERIOD_RESET:
+            ad_chat.period = AdChatModel.period.default.arg
             await self.storage.Session.commit()
 
-        elif data.command == self.SENDER_CHAT.PERIOD_CHANGE:
+        elif data.command == self.CHAT.PERIOD_CHANGE:
             self.storage.Session.add(
                 InputModel(
                     chat_id=chat_id,
@@ -339,14 +337,95 @@ class ChatMessage(object):
                 reply_markup=IKM([[IKB('Отменить', self.INPUT.CANCEL)]]),
             )
 
-        category_list = []
-        if chat.category_id is not None:
-            category: CategoryModel = await self.storage.Session.get(
-                CategoryModel, chat.category_id
+        sent_ads_count: int = await self.storage.Session.scalar(
+            select(count()).where(with_parent(ad_chat, AdChatModel.sent_ads))
+        )
+        if data.command == self.CHAT.JOURNAL:
+            if not sent_ads_count:
+                return await abort(
+                    'У этого объявления нет пересланных сообщений.'
+                )
+
+            journal_page_index = data.kwargs.get('aj_cp') if data else None
+            if not isinstance(journal_page_index, int):
+                journal_page_index = 0
+
+            page_list_size: int = await self.storage.Session.scalar(
+                select(SettingsModel.page_list_size).where(
+                    SettingsModel.id.is_(True)
+                )
             )
-            category_list.append(category.name)
-            while category.parent is not None:
-                category_list.append((category := category.parent).name)
+            total_journal_pages = -(-sent_ads_count // page_list_size)
+            messages = await self.storage.Session.scalars(
+                select(AdChatMessageModel)
+                .where(with_parent(ad_chat, AdChatModel.sent_ads))
+                .order_by(AdChatMessageModel.timestamp.desc())
+                .slice(
+                    min(journal_page_index, total_journal_pages - 1)
+                    * page_list_size,
+                    min(journal_page_index + 1, total_journal_pages)
+                    * page_list_size,
+                )
+                .options(contains_eager(AdChatMessageModel.ad_chat))
+            )
+            if not (messages := messages.all()):
+                return await abort('Для этого чата нет высланных сообщений.')
+
+            return await self.send_or_edit(
+                *(chat_id, message_id),
+                text='\n'.join(
+                    _
+                    for _ in (
+                        message_header(self, ad_chat, chat_id),
+                        '',
+                        '**Всего сообщений в журнале:** %s шт'
+                        % sent_ads_count,
+                    )
+                    if _ is not None
+                ),
+                reply_markup=[
+                    [
+                        IKB(
+                            ' '.join(
+                                _
+                                for _ in (
+                                    sent_ad.timestamp.astimezone(
+                                        tzlocal()
+                                    ).strftime(
+                                        r'%H:%M:%S'
+                                        if datetime.now(tzlocal()).date()
+                                        == sent_ad.timestamp.astimezone(
+                                            tzlocal()
+                                        ).date()
+                                        else r'%Y-%m-%d %H:%M:%S'
+                                    )
+                                    if sent_ad.timestamp is not None
+                                    else str(sent_ad.chat_id),
+                                    sent_ad.ad_chat.chat.title
+                                    if sent_ad.ad_chat
+                                    else None,
+                                )
+                                if _
+                            ),
+                            url=sent_ad.link,
+                        )
+                    ]
+                    for sent_ad in messages
+                ]
+                + self.hpages(
+                    journal_page_index,
+                    total_journal_pages,
+                    Query(
+                        self.CHAT.JOURNAL,
+                        ad_chat.ad_chat_id,
+                        ad_chat.ad_message_id,
+                        ad_chat.chat_id,
+                        **(data.kwargs if data is not None else {}),
+                    ),
+                    kwarg='aj_cp',
+                )
+                + [[IKB('Назад', data(self.CHAT.PAGE))]],
+            )
 
         return await self.send_or_edit(
             *(chat_id, message_id),
@@ -355,66 +434,66 @@ class ChatMessage(object):
                 for _ in (
                     '**__Чат %s__**'
                     % (
-                        f'@{chat.username}'
-                        if chat.username
-                        else f'[{chat.id}]({chat.invite_link or str()})'
+                        f'@{ad_chat.chat.username}'
+                        if ad_chat.chat.username
+                        else '[%s](%s)'
+                        % (ad_chat.chat_id, ad_chat.chat.invite_link or '')
                     ),
                     '',
-                    '**Имя:** ' + chat.title if chat.title else None,
-                    '**Описание:** ' + chat.description
-                    if chat.title and chat.description
+                    '**Имя:** ' + ad_chat.chat.title
+                    if ad_chat.chat.title
+                    else None,
+                    '**Описание:** ' + ad_chat.chat.description
+                    if ad_chat.chat.title and ad_chat.chat.description
                     else None,
                     '**Статус:** '
-                    + ('Активен' if chat.active else 'Неактивен'),
-                    '**Периодичность:** ' + self.morph.timedelta(chat.period),
-                    '**Категория:** {}'.format(
-                        ' > '.join(reversed(category_list))
-                        if category_list
-                        else '__Отсутствует__'
-                    ),
+                    + ('Активен' if ad_chat.active else 'Неактивен'),
+                    '**Периодичность:** '
+                    + self.morph.timedelta(ad_chat.period),
                     '**Причина деактивации:** '
                     + (
                         'Id чата изменился. Попробуйте добавить чат заново.'
-                        if chat.deactivated_cause
+                        if ad_chat.deactivated_cause
                         == CHAT_DEACTIVATED.PEER_INVALID
-                        else 'Проверьте настройки периодичности рассылки для '
-                        'этого канала.'
-                        if chat.deactivated_cause == CHAT_DEACTIVATED.SLOWMODE
                         else 'Канал не валиден.'
-                        if chat.deactivated_cause == CHAT_DEACTIVATED.INVALID
+                        if ad_chat.deactivated_cause
+                        == CHAT_DEACTIVATED.INVALID
                         else 'Канал был забанен.'
-                        if chat.deactivated_cause
+                        if ad_chat.deactivated_cause
                         == CHAT_DEACTIVATED.CHANNEL_BANNED
                         else 'Приватный канал.'
-                        if chat.deactivated_cause == CHAT_DEACTIVATED.PRIVATE
+                        if ad_chat.deactivated_cause
+                        == CHAT_DEACTIVATED.PRIVATE
                         else 'Для рассылки в этом чате необходимо обладать '
                         'правами администратора.'
-                        if chat.deactivated_cause
+                        if ad_chat.deactivated_cause
                         == CHAT_DEACTIVATED.ADMIN_REQUIRED
                         else 'Рассылка в этот канал воспрещена.'
-                        if chat.deactivated_cause
+                        if ad_chat.deactivated_cause
                         == CHAT_DEACTIVATED.WRITE_FORBIDDEN
                         else 'Канал ограничен.'
-                        if chat.deactivated_cause
+                        if ad_chat.deactivated_cause
                         == CHAT_DEACTIVATED.RESTRICTED
                         else 'Юзер забанен.'
-                        if chat.deactivated_cause
+                        if ad_chat.deactivated_cause
                         == CHAT_DEACTIVATED.USER_BANNED
                         else 'Неизвестна.'
                     )
-                    if chat.deactivated_cause is not None
+                    if ad_chat.deactivated_cause is not None
                     else None,
+                    '**Количество пересланных сообщений:** %s шт'
+                    % sent_ads_count,
                     '__Добавлен:__ '
-                    + chat.created_at.astimezone().strftime(
+                    + ad_chat.created_at.astimezone().strftime(
                         r'%Y-%m-%d %H:%M:%S'
                     )
-                    if chat.created_at is not None
+                    if ad_chat.created_at is not None
                     else None,
                     '__Обновлен:__ '
-                    + chat.updated_at.astimezone().strftime(
+                    + ad_chat.updated_at.astimezone().strftime(
                         r'%Y-%m-%d %H:%M:%S'
                     )
-                    if chat.updated_at is not None
+                    if ad_chat.updated_at is not None
                     else None,
                 )
                 if _ is not None
@@ -422,51 +501,43 @@ class ChatMessage(object):
             reply_markup=IKM(
                 [
                     [
-                        IKB('Обновить', data(self.SENDER_CHAT.REFRESH)),
+                        IKB('Обновить', data(self.CHAT.REFRESH)),
                         IKB(
                             'Выключить для рассылки'
-                            if chat.active
+                            if ad_chat.active
                             else 'Включить для рассылки',
-                            data(self.SENDER_CHAT.ACTIVATE),
+                            data(self.CHAT.ACTIVATE),
                         ),
                     ],
                     (
                         [
                             IKB(
                                 'Сбросить период',
-                                data(self.SENDER_CHAT.PERIOD_RESET),
+                                data(self.CHAT.PERIOD_RESET),
                             )
                         ]
-                        if getattr(ChatModel.period.default, 'arg', None)
+                        if getattr(AdChatModel.period.default, 'arg', None)
                         is not None
-                        and chat.period != ChatModel.period.default
+                        and ad_chat.period != AdChatModel.period.default
                         else []
                     )
                     + [
                         IKB(
                             'Изменить период',
-                            data(self.SENDER_CHAT.PERIOD_CHANGE),
+                            data(self.CHAT.PERIOD_CHANGE),
                         )
                     ],
-                    (
-                        [
-                            IKB(
-                                'Удалить категорию',
-                                data(self.SENDER_CHAT.REMOVE_CATEGORY),
-                            )
-                        ]
-                        if chat.category_id is not None
-                        else []
-                    )
-                    + [
+                    [
                         IKB(
-                            'Изменить категорию'
-                            if chat.category_id is not None
-                            else 'Добавить категорию',
-                            data(self.SENDER_CHAT.CATEGORY),
+                            'Назад',
+                            Query(
+                                self.CHAT.LIST,
+                                ad_chat.ad_chat_id,
+                                ad_chat.ad_message_id,
+                                **(data.kwargs if data else {}),
+                            ),
                         )
                     ],
-                    [IKB('Назад', data(self.SENDER_CHAT.LIST))],
                 ]
             ),
         )
@@ -505,8 +576,8 @@ class ChatMessage(object):
             )
         input, chat_id = chat_id, chat_id.chat_id
 
-        chat = await self.storage.Session.get(ChatModel, input.data.args)
-        if chat is None:
+        ad_chat = await self.storage.Session.get(AdChatModel, input.data.args)
+        if ad_chat is None:
             return await abort('Чат не найден.')
 
         if not isinstance(message_id, Message):
@@ -524,7 +595,7 @@ class ChatMessage(object):
             )
 
         fractions = ('days', 'hours', 'minutes', 'seconds')
-        chat.period = timedelta(
+        ad_chat.period = timedelta(
             **dict(zip(fractions[-len(numbers) :], numbers))
         )
         await self.storage.Session.commit()
@@ -571,7 +642,7 @@ class ChatMessage(object):
             _kw = {k: v for k, v in input.data.kwargs.items() if k not in keys}
             input.data = input.data.__copy__(kwargs=_kw | kwargs)
 
-        if data is not None and data.command == self.SENDER_CHAT.REFRESH:
+        if data is not None and data.command == self.CHAT.REFRESH:
             refresh = not bool(input.data.kwargs.get('refresh'))
             modify_kwargs(refresh=int(refresh))
             await self.storage.Session.commit()
@@ -584,7 +655,7 @@ class ChatMessage(object):
                                 'Обновлять существующие чаты: Да'
                                 if refresh
                                 else 'Обновлять существующие чаты: Нет',
-                                self.SENDER_CHAT.REFRESH,
+                                self.CHAT.REFRESH,
                             )
                         ],
                         [IKB('Отменить', self.INPUT.CANCEL)],
@@ -592,14 +663,6 @@ class ChatMessage(object):
                 ),
             )
             return False
-
-        if 'category_id' not in input.data.kwargs:
-            used_message = InputMessageModel(
-                message_id=message_id, input=input
-            )
-            self.storage.Session.add(used_message)
-            await self.storage.Session.commit()
-            return await abort('Сначала выберите категорию в сообщении выше.')
 
         if not isinstance(_message_id, Message):
             _message_id = await self.get_messages(chat_id, _message_id)
@@ -673,10 +736,10 @@ class ChatMessage(object):
         self.scheduler.add_job(
             self.storage.scoped(self._chats_add_notify),
             trigger='interval',
-            seconds=1,
+            seconds=3,
             id=f'add_chats_add_notify:{chat_id}',
             args=(
-                *(input, n_message_id, data, query_id),
+                *(chat_id, n_message_id, data, query_id),
                 *(total_count, existing, *_, *__),
             ),
             replace_existing=True,
@@ -709,29 +772,36 @@ class ChatMessage(object):
             if not chat.invite_link and self.INVITE_LINK_RE.search(chat_link):
                 chat.invite_link = chat_link
 
-            category_id = input.data.kwargs.get('category_id')
-            sender_chat: Optional[ChatModel] = await self.storage.Session.get(
-                ChatModel, chat.id
+            ad_chat: Optional[ChatModel] = await self.storage.Session.get(
+                AdChatModel, (*input.data.args, chat.id)
             )
-            if sender_chat is None:
+            if ad_chat is None:
                 new_chats.value += 1
+                _chat = await self.storage.Session.get(ChatModel, chat.id)
+                if _chat is not None:
+                    _chat.title = chat.title
+                    _chat.description = chat.description
+                    _chat.username = chat.username
+                    _chat.invite_link = chat.invite_link or _chat.invite_link
                 self.storage.Session.add(
-                    ChatModel(
-                        id=chat.id,
-                        title=chat.title,
-                        description=chat.description,
-                        username=chat.username,
-                        invite_link=chat.invite_link,
-                        category_id=category_id,
-                    )
+                    AdChatModel(
+                        ad_chat_id=input.data.args[0],
+                        ad_message_id=input.data.args[1],
+                        chat=_chat
+                        or ChatModel(
+                            id=chat.id,
+                            title=chat.title,
+                            description=chat.description,
+                            username=chat.username,
+                            invite_link=chat.invite_link,
+                        ),
+                    ),
                 )
             else:
-                sender_chat.title = chat.title
-                sender_chat.description = chat.description
-                sender_chat.username = chat.username
-                sender_chat.invite_link = chat.invite_link
-                if sender_chat.category_id is None:
-                    sender_chat.category_id = category_id
+                ad_chat.chat.title = chat.title
+                ad_chat.chat.description = chat.description
+                ad_chat.chat.username = chat.username
+                ad_chat.chat.invite_link = chat.invite_link
             await self.storage.Session.commit()
 
         chat_index: int = -1
@@ -754,7 +824,7 @@ class ChatMessage(object):
                 await sleep(flood_wait)
                 continue
 
-            async with auto_init(self.get_worker(phone_number)) as worker:
+            async with self.worker(phone_number) as worker:
                 async for chat in worker.iter_check_chats(
                     check_chats[chat_index + 1 :],
                     folder_id=1,
@@ -844,9 +914,9 @@ class ChatMessage(object):
                 await self.delete_messages(input.chat_id, input.message_id)
 
         if input.success:
-            return await self.start_message(input, message_id, data, query_id)
+            return await self.ad_message(input, message_id, data, query_id)
         elif data is not None:
-            return await self.start_message(input, None, data, query_id)
+            return await self.ad_message(input, None, data, query_id)
 
     async def _chats_add_notify(
         self: 'AdBotClient',
@@ -879,12 +949,15 @@ class ChatMessage(object):
 
         if not finish and not can_update.value:
             return None
-        elif not isinstance(chat_id, InputModel):
-            return await abort(
-                'Обновить состояние добавления чатов можно только через '
-                'сообщение.'
-            )
-        input, chat_id = chat_id, chat_id.chat_id
+        if not isinstance(chat_id, InputModel):
+            input = await self.storage.Session.get(InputModel, chat_id)
+            if input is None:
+                return await abort(
+                    'Обновить состояние добавления чатов можно только через '
+                    'сообщение.'
+                )
+        else:
+            input, chat_id = chat_id, chat_id.chat_id
         if isinstance(message_id, Message):
             message_id = message_id.id
 

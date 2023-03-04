@@ -5,10 +5,11 @@ from typing import TYPE_CHECKING, Union
 
 from dateutil.tz.tz import tzlocal
 
+from ...models.clients.ad_chat_message_model import AdChatMessageModel
+from ...models.clients.ad_chat_model import AdChatModel
 from ...models.clients.ad_model import AdModel
 from ...models.clients.bot_model import BotModel
 from ...models.clients.user_model import UserModel, UserRole
-from ...models.bots.sent_ad_model import SentAdModel
 
 if TYPE_CHECKING:
     from ...ad_bot_client import AdBotClient
@@ -27,7 +28,7 @@ def subscription_text(user: UserModel, /) -> str:
 
 def message_header(
     client: 'AdBotClient',
-    model: Union[BotModel, AdModel, SentAdModel],
+    model: Union[BotModel, AdModel, AdChatModel],
     /,
     from_user_id: int,
 ) -> str:
@@ -64,17 +65,17 @@ def message_header(
             confirmed = f'[{confirmed}](%s)' % user.service_invite
         return ('**%s**' if model.confirmed else '__%s__') % confirmed
 
-    if isinstance(model, SentAdModel):
+    if isinstance(model, AdChatModel):
         return '  '.join(
             _
             for _ in (
-                f'**История объявления #{model.ad.message_id}**',
+                f'**История объявления #{model.ad_message_id}**',
                 f'**__([Бота #{model.ad.owner_bot.id}]'
                 f'(t.me/+{model.ad.owner_bot.phone_number}))__**'
                 if model.ad.owner_bot.phone_number is not None
                 else f'**(Бота #{model.ad.owner_bot.id})**',
                 whose(model.ad.owner_bot.owner)
-                if model.ad.owner_bot.owner.id != from_user_id
+                if model.ad.owner_bot.owner_id != from_user_id
                 else None,
             )
             if _ is not None
@@ -90,7 +91,7 @@ def message_header(
                 if model.owner_bot.phone_number is not None
                 else f'**(Бота #{model.owner_bot.id})**',
                 whose(model.owner_bot.owner)
-                if model.owner_bot.owner.id != from_user_id
+                if model.owner_bot.owner_id != from_user_id
                 else None,
                 confirmed(model.owner_bot.owner),
             )

@@ -1,8 +1,7 @@
 from asyncio import AbstractEventLoop, Lock, Semaphore, Task, get_event_loop
 from concurrent.futures import Executor, ThreadPoolExecutor
-from contextlib import suppress
+from contextlib import asynccontextmanager, suppress
 from dataclasses import dataclass
-from http import client
 from logging import Logger, getLogger
 from pathlib import Path
 from typing import (
@@ -14,6 +13,7 @@ from typing import (
     List,
     Optional,
     Self,
+    Set,
     Type,
 )
 
@@ -26,11 +26,7 @@ from pyrogram.client import Cache, Client
 from pyrogram.enums.parse_mode import ParseMode
 from pyrogram.parser import Parser
 from pyrogram.session.internals import MsgId
-from pyrogram.session.session import Session
-from sqlalchemy.event.api import listen, remove
-from sqlalchemy.sql.expression import select
-from sqlalchemy.sql.functions import now
-from sqlalchemy.sql.sqltypes import String
+from sqlalchemy.event.api import remove
 
 from .ad_bot_handler import AdBotHandler
 from .ad_bot_session import AdBotSession
@@ -38,12 +34,8 @@ from .jobs import Jobs
 from .messages import Commands, Messages
 from .methods import Methods
 from .models.base_interface import BaseInterface
-from .models.clients.user_model import UserModel, UserRole
-from .models.misc.input_model import InputModel
-from .models.misc.settings_model import SettingsModel
 from .sqlalchemy_storage import SQLAlchemyStorage
 from .utils.cached_morph_analyzer import CachedMorphAnalyzer
-from .utils.pyrogram import auto_init
 from .utils.sqlalchemy_pg_compiler_patch import PGCompiler  # noqa: F401
 
 
@@ -103,6 +95,9 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
     ]
     morph: Final[Type[CachedMorphAnalyzer]]
     _workers: ClassVar[Dict[int, Self]] = {}
+    _workers_locks: ClassVar[Dict[int, Lock]] = {}
+    _workers_count: ClassVar[Dict[int, int]] = {}
+    _workers_must_stop: ClassVar[Set[int]] = set()
     Registry: ClassVar[Dict[int, Dict[int, Dict[str, List[Task]]]]] = {}
 
     def __init__(
@@ -194,100 +189,6 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
         object.__setattr__(self, 'disconnect_handler', None)
         object.__setattr__(self, 'username', None)
         object.__setattr__(self, 'is_bot', None)
-        if self.storage.is_nested:
-            # self.groups[0] = [
-            #     AdBotHandler(self.reply_to_user, action=None, is_query=False)
-            # ]
-            return
-
-        self.groups[0] = [
-            AdBotHandler(
-                self.input_message,
-                self.INPUT,
-                replace=True,
-                private=False,
-            ),
-            AdBotHandler(self.page_message, self.PAGE, is_query=True),
-            #
-            AdBotHandler(self.start_message, '/start', is_query=False),
-            AdBotHandler(
-                self.start_message,
-                self.SERVICE._SELF,
-                is_query=True,
-            ),
-            #
-            AdBotHandler(
-                self.service_help,
-                self.HELP,
-                private=False,
-                is_query=True,
-            ),
-            AdBotHandler(
-                self.service_validation,
-                self.SERVICE,
-                private=False,
-                is_query=True,
-            ),
-            AdBotHandler(
-                self.service_subscription,
-                self.SUBSCRIPTION,
-                private=False,
-                is_query=True,
-            ),
-            #
-            AdBotHandler(
-                self.chats_list,
-                self.SENDER_CHAT.LIST,
-                check_user=UserRole.SUPPORT,
-                is_query=True,
-            ),
-            AdBotHandler(
-                self.chat_message,
-                self.SENDER_CHAT,
-                check_user=UserRole.SUPPORT,
-                is_query=True,
-            ),
-            #
-            AdBotHandler(
-                self.clients_list,
-                self.SENDER_CLIENT.LIST,
-                check_user=UserRole.SUPPORT,
-                is_query=True,
-            ),
-            AdBotHandler(
-                self.client_message,
-                self.SENDER_CLIENT,
-                check_user=UserRole.SUPPORT,
-                is_query=True,
-            ),
-            #
-            AdBotHandler(
-                self.bots_list,
-                self.BOT.LIST,
-                check_user=UserRole.SUPPORT,
-                is_query=True,
-            ),
-            AdBotHandler(
-                self.bot_message,
-                self.BOT,
-                check_user=UserRole.USER,
-                is_query=True,
-            ),
-            #
-            AdBotHandler(
-                self.settings_message,
-                (self.SETTINGS, self.SETTINGS_DELETE),
-                check_user=UserRole.USER,
-                is_query=True,
-            ),
-            #
-            AdBotHandler(
-                self.ad_message,
-                self.AD,
-                check_user=UserRole.USER,
-                is_query=True,
-            ),
-        ]
 
     def __del__(self: Self, /) -> None:
         with suppress(AttributeError):
@@ -299,54 +200,8 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
 
     async def start(self: Self, /) -> Self:
         with suppress(SchedulerAlreadyRunningError):
-            self.scheduler.start(paused=True)
-        if (self := await super().start()).storage.is_nested:
-            return self
-
-        settings: SettingsModel
-        settings = await self.storage.Session.get(SettingsModel, True)
-        self.input_create_listeners()
-        self.user_create_listeners(settings.notify_subscription_end)
-        for model, value in self.listeners.items():
-            for name, listeners in value.items():
-                for listener in listeners:
-                    listen(model, name, listener, propagate=True)
-
-        async for input in await self.storage.Session.stream_scalars(
-            select(InputModel).filter_by(success=None)
-        ):
-            self.add_input_handler(
-                input.chat_id,
-                input.group,
-                query_pattern=input.query_pattern,
-                user_role=input.user_role,
-                calls_count=input.calls_count,
-                action=input.action,
-                replace_calls=input.replace_calls,
-            )
-
-        async for user in await self.storage.Session.stream_scalars(
-            select(UserModel).filter(
-                UserModel.role.cast(String).not_in(
-                    {UserRole.SUPPORT, UserRole.ADMIN}
-                ),
-                UserModel.subscription_from.is_not(None),
-                UserModel.subscription_period.is_not(None),
-                UserModel.subscription_from
-                > now()
-                - UserModel.subscription_period
-                + settings.notify_subscription_end,
-            )
-        ):
-            self.notify_subscription_end_job_init(
-                user, settings.notify_subscription_end
-            )
-
-        self.sender_job_init(settings.send_interval)
-        self.warmup_job_init(settings.warmup_interval)
-        await self.storage.Session.remove()
-        self.scheduler.resume()
-        return self
+            self.scheduler.start()
+        return await super().start()
 
     async def stop(self: Self, /) -> Self:
         try:
@@ -355,17 +210,28 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
             if not self.storage.is_nested:
                 with suppress(SchedulerNotRunningError):
                     self.scheduler.shutdown(wait=False)
-                for worker in self.__class__._workers.values():
-                    async with auto_init(worker, start=False, stop=True):
+                for worker in list(self.__class__._workers.values()):
+                    async with self.worker(
+                        worker.phone_number,
+                        start=False,
+                        stop=True,
+                        suppress=True,
+                    ):
                         pass
                 await self.storage.Session.remove()
 
-    def get_worker(
+    @asynccontextmanager
+    async def worker(
         self: Self,
         phone_number: int,
         /,
+        *,
+        start: bool = True,
+        stop: Optional[bool] = True,
+        only_connect: bool = False,
+        suppress: bool = False,
         **kwargs: Any,
-    ) -> Self:
+    ):
         """
         Return the worker client by the `phone_number` for this `client`.
 
@@ -382,7 +248,7 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
         Raises:
             ValueError, in case phone number is invalid.
         """
-        if phone_number not in self.__class__._workers:
+        if phone_number not in (cls := self.__class__)._workers:
             if 'api_id' not in kwargs:
                 kwargs['api_id'] = self.api_id
             if 'api_hash' not in kwargs:
@@ -396,7 +262,51 @@ class AdBotClient(Commands, Jobs, Messages, Methods, Client):
                 )
             if 'scheduler' not in kwargs:
                 kwargs['scheduler'] = self.scheduler
-            self.__class__._workers[phone_number] = self.__class__(
-                **kwargs, no_updates=True
-            )
-        return self.__class__._workers[phone_number]
+            if 'no_updates' not in kwargs:
+                kwargs['no_updates'] = True
+            cls._workers[phone_number] = cls(**kwargs)
+
+        is_initialized: Optional[bool] = None
+        client = cls._workers[phone_number]
+        try:
+            if phone_number not in cls._workers_locks:
+                cls._workers_locks[phone_number] = Lock()
+            async with cls._workers_locks[phone_number]:
+                if stop is None:
+                    is_initialized = not client.is_initialized
+                if start and (
+                    not client.is_initialized and not client.is_connected
+                ):
+                    try:
+                        if only_connect:
+                            await client.connect()
+                        else:
+                            await client.start()
+                    except BaseException as _:
+                        if not suppress:
+                            raise
+                if phone_number not in cls._workers_count:
+                    cls._workers_count[phone_number] = 0
+                cls._workers_count[phone_number] += 1
+                if stop or stop is None and is_initialized:
+                    cls._workers_must_stop.add(phone_number)
+            yield client
+        finally:
+            if phone_number not in cls._workers_locks:
+                cls._workers_locks[phone_number] = Lock()
+            async with cls._workers_locks[phone_number]:
+                if phone_number not in cls._workers_count:
+                    cls._workers_count[phone_number] = 1
+                cls._workers_count[phone_number] -= 1
+                if cls._workers_count[phone_number] <= 0 and (
+                    phone_number in cls._workers_must_stop
+                ):
+                    try:
+                        if client.is_initialized:
+                            await client.stop()
+                        elif client.is_connected:
+                            await client.disconnect()
+                    except BaseException as _:
+                        if not suppress:
+                            raise
+                    cls._workers_must_stop.remove(phone_number)

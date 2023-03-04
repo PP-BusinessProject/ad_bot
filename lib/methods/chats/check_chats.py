@@ -55,6 +55,8 @@ class CheckChats(object):
         chats: CheckChat,
         /,
         folder_id: Optional[int] = None,
+        *,
+        fetch_peers: bool = True,
     ) -> Optional[Chat]:
         pass
 
@@ -64,6 +66,8 @@ class CheckChats(object):
         chats: Iterable[CheckChat],
         /,
         folder_id: Optional[int] = None,
+        *,
+        fetch_peers: bool = True,
     ) -> list[Optional[Chat]]:
         pass
 
@@ -72,6 +76,8 @@ class CheckChats(object):
         chats: Union[CheckChat, Iterable[CheckChat]],
         /,
         folder_id: Optional[int] = None,
+        *,
+        fetch_peers: bool = True,
     ) -> Union[Optional[Chat], list[Optional[Chat]]]:
         """
         Check if each of the chats is accesible by this client.
@@ -102,7 +108,12 @@ class CheckChats(object):
         if not (is_iterable := is_iter(chats) and any(map(is_iter, chats))):
             chats = (chats,)
 
-        agen = self.iter_check_chats(chats, folder_id, yield_on_flood=False)
+        agen = self.iter_check_chats(
+            chats,
+            folder_id,
+            fetch_peers=fetch_peers,
+            yield_on_flood=False,
+        )
         if not is_iterable:
             return await anext(aiter(agen), None)
         return [_ async for _ in agen]
@@ -113,6 +124,7 @@ class CheckChats(object):
         /,
         folder_id: Optional[int] = None,
         *,
+        fetch_peers: bool = True,
         yield_on_flood: Optional[bool] = None,
     ) -> AsyncGenerator[Optional[Chat], None]:
         """
@@ -230,7 +242,9 @@ class CheckChats(object):
                     dialog_chats[chat_link] = await self.get_chat(peer)
         elif peers:
             with suppress(NotAcceptable):
-                for dialog in await self.get_peer_dialogs(peers.values()):
+                for dialog in await self.get_peer_dialogs(
+                    peers.values(), fetch_peers=fetch_peers
+                ):
                     if dialog.top_message is not None:
                         for chat_link, chat in chats.items():
                             if (peer := peers.get(chat_link)) is not None:

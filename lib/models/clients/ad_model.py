@@ -2,7 +2,7 @@
 
 from typing import TYPE_CHECKING, Final, List, Optional, Self, Type
 
-from sqlalchemy import CheckConstraint, ForeignKey
+from sqlalchemy import CheckConstraint
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.base import Mapped
@@ -13,11 +13,10 @@ from sqlalchemy.sql.sqltypes import Boolean, Integer
 
 from .._mixins import Timestamped
 from ..base_interface import Base, TableArgs
-from ..misc.category_model import CategoryModel
 from .bot_model import BotModel, UserModel
 
 if TYPE_CHECKING:
-    from ..bots.sent_ad_model import SentAdModel
+    from .ad_chat_model import AdChatModel
 
 
 class AdModel(Timestamped, Base):
@@ -79,10 +78,6 @@ class AdModel(Timestamped, Base):
         CheckConstraint('message_id > 0'),
         primary_key=True,
     )
-    category_id: Final[Column[Optional[int]]] = Column(
-        CategoryModel.id.type,
-        ForeignKey(CategoryModel.id, onupdate='CASCADE', ondelete='SET NULL'),
-    )
     confirm_message_id: Column[Optional[int]] = Column(
         Integer,
         CheckConstraint(
@@ -111,17 +106,9 @@ class AdModel(Timestamped, Base):
         cascade='save-update',
         uselist=False,
     )
-    category: Mapped[
-        'RelationshipProperty[Optional[CategoryModel]]'
-    ] = relationship(
-        'CategoryModel',
-        back_populates='ads',
-        lazy='noload',
-        cascade='save-update',
-        uselist=False,
-    )
-    sent_ads: Mapped['RelationshipProperty[List[SentAdModel]]'] = relationship(
-        'SentAdModel',
+
+    chats: Mapped['RelationshipProperty[List[AdChatModel]]'] = relationship(
+        'AdChatModel',
         back_populates='ad',
         lazy='noload',
         cascade='save-update, merge, expunge, delete, delete-orphan',

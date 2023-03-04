@@ -28,7 +28,6 @@ from ...models.clients.user_model import UserModel, UserRole
 from ...models.misc.input_model import InputModel
 from ...models.misc.settings_model import SettingsModel
 from ...models.sessions.session_model import SessionModel
-from ...utils.pyrogram import auto_init
 from ...utils.query import Query
 from .utils import message_header, subscription_text
 
@@ -270,13 +269,14 @@ class BotMessage(object):
                 .order_by(ClientModel.created_at)
             )
             for phone_number in phone_numbers.all():
-                async with auto_init(self.get_worker(phone_number)) as worker:
+                async with self.worker(phone_number) as worker:
                     with suppress(FloodWait):
                         try:
                             self.initialize_user_service
                             owner = await self.storage.Session.merge(
                                 await worker.initialize_user_service(
-                                    owner, promote_users=self.username
+                                    owner,
+                                    promote_users=await self.storage.user_id(),
                                 )
                             )
                         except PeerIdInvalid:
@@ -425,7 +425,7 @@ class BotMessage(object):
                 .order_by(ClientModel.created_at)
             )
             for phone_number in phone_numbers.all():
-                async with auto_init(self.get_worker(phone_number)) as worker:
+                async with self.worker(phone_number) as worker:
                     with suppress(RPCError):
                         if await worker.check_chats(
                             (
@@ -445,7 +445,10 @@ class BotMessage(object):
                             await self.storage.Session.merge(
                                 await worker.initialize_user_service(
                                     bot.owner,
-                                    promote_users=[self.username, chat_id],
+                                    promote_users=[
+                                        await self.storage.user_id(),
+                                        chat_id,
+                                    ],
                                 )
                             )
                             await self.storage.Session.commit()
@@ -520,11 +523,10 @@ class BotMessage(object):
         if bot.phone_number is not None and (
             chat_id == bot.owner.id and bot.forward_to_id is not None
         ):
-            bot_worker = self.get_worker(bot.phone_number)
-            if bot_valid := await bot_worker.validate():
-                async with auto_init(bot_worker):
+            async with self.worker(bot.phone_number, suppress=True) as worker:
+                if bot_valid := await worker.validate():
                     bot_has_forward_peer = bool(
-                        await bot_worker.check_chats(bot.forward_to_id)
+                        await worker.check_chats(bot.forward_to_id)
                     )
 
         max_ads: int = await self.storage.Session.scalar(

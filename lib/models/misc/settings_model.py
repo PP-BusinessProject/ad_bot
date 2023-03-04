@@ -40,6 +40,12 @@ class SettingsModel(Base):
         nullable=False,
         default=timedelta(seconds=30),
     )
+    check_interval: Final[Column[timedelta]] = Column(
+        Interval(second_precision=0),
+        CheckConstraint("check_interval > INTERVAL '0 days'"),
+        nullable=False,
+        default=timedelta(seconds=60),
+    )
     warmup_interval: Final[Column[timedelta]] = Column(
         Interval(second_precision=0),
         CheckConstraint("warmup_interval > INTERVAL '0 days'"),

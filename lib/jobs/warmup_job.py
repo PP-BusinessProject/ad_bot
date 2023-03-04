@@ -11,10 +11,10 @@ from pyrogram.types.user_and_chats.chat import Chat
 from sqlalchemy.future import select
 from sqlalchemy.sql.expression import exists, text, update
 
-from ..models.bots.chat_model import ChatModel
+from ..models.clients.chat_model import ChatModel
 from ..models.bots.client_model import ClientModel
 from ..models.sessions.session_model import SessionModel
-from ..utils.pyrogram import auto_init, get_input_peer_id
+from ..utils.pyrogram import get_input_peer_id
 
 if TYPE_CHECKING:
     from ..ad_bot_client import AdBotClient
@@ -40,23 +40,6 @@ class WarmupJob(object):
         )
 
     async def warmup_job(self: 'AdBotClient', /) -> None:
-        """
-        Process the job that sends every `ad` from `service_id`.
-
-        The ads are send in order one by one.
-
-        Steps:
-        1. Process all the dependencies.
-        2. Get the next chat for sending from the `SENDER_CHATS`.
-            1. Check the active status of the each chat.
-            2. Check category of the each chat.
-            3. Get the chat with the biggest last sent time.
-            4. Set the chat's last sent time to current time.
-        3. Try to send an `ad` to the found chat.
-
-        Returns:
-            Nothing.
-        """
         sender_chats: list[ChatModel] = await self.storage.Session.scalars(
             select(ChatModel).where(ChatModel.valid)
         )
@@ -74,7 +57,7 @@ class WarmupJob(object):
             )
         )
         for phone_number in phone_numbers.all():
-            async with auto_init(self.get_worker(phone_number)) as worker:
+            async with self.worker(phone_number) as worker:
                 try:
                     chats: dict[int, Chat] = {
                         chat.id: chat

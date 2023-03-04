@@ -1,6 +1,6 @@
 """Utilities for working with Pyrogram."""
 
-from asyncio import Lock
+
 from contextlib import suppress
 from functools import wraps
 from logging import error
@@ -10,16 +10,12 @@ from typing import (
     Any,
     Awaitable,
     Callable,
-    ClassVar,
     Concatenate,
     Coroutine,
-    Final,
     Generator,
-    Generic,
     Iterable,
     Optional,
     ParamSpec,
-    Self,
     Type,
     TypeVar,
     Union,
@@ -353,84 +349,3 @@ def auto_answer(
                     await update.answer()
 
     return wrapper
-
-
-class auto_init(Generic[_Client]):
-    """Automatically initialize and stop the :class:`Client` if needed."""
-
-    _client: Final[_Client]
-    _start: Final[bool]
-    _stop: Final[Optional[bool]]
-    _only_connect: Final[bool]
-    _suppress: Final[bool]
-    _is_initialized: Optional[bool] = None
-    _locks: ClassVar[dict[Optional[str], Lock]] = {}
-
-    def __init__(
-        self,
-        client: _Client,
-        /,
-        *,
-        start: bool = True,
-        stop: Optional[bool] = False,
-        only_connect: bool = False,
-        suppress: bool = False,
-    ) -> None:
-        """Initialize this class."""
-        self._client, self._start, self._stop = client, start, stop
-        self._only_connect, self._suppress = only_connect, suppress
-
-    @property
-    def client(self: Self, /) -> _Client:
-        """Return the client that is being initialized."""
-        return self._client
-
-    @property
-    def start(self: Self, /) -> bool:
-        """If the `client` should be started if it has not been started yet."""
-        return self._start
-
-    @property
-    def stop(self: Self, /) -> Optional[bool]:
-        """If the `client` should be stopped on exit."""
-        return self._stop
-
-    @property
-    def only_connect(self: Self, /) -> bool:
-        """If the `client` should be only connected but not started."""
-        return self._only_connect
-
-    @property
-    def suppress(self: Self, /) -> bool:
-        """If the `client` start errors should be suppressed."""
-        return self._suppress
-
-    async def __aenter__(self: Self, /) -> _Client:
-        if self._client.phone_number not in self._locks:
-            self._locks[self._client.phone_number] = Lock()
-        async with self._locks[self._client.phone_number]:
-            if self._stop is None:
-                self._is_initialized = not self._client.is_initialized
-            if self._start and (
-                not self._client.is_initialized
-                and not self._client.is_connected
-            ):
-                try:
-                    if self._only_connect:
-                        await self._client.connect()
-                    else:
-                        await self._client.start()
-                except BaseException:
-                    if not self._suppress:
-                        raise
-            return self._client
-
-    async def __aexit__(self: Self, /, *_: Any) -> None:
-        if self._client.phone_number not in self._locks:
-            self._locks[self._client.phone_number] = Lock()
-        async with self._locks[self._client.phone_number]:
-            if self._stop or self._stop is None and self._is_initialized:
-                if self._client.is_initialized:
-                    await self._client.stop()
-                elif self._client.is_connected:
-                    await self._client.disconnect()

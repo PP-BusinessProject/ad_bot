@@ -111,8 +111,6 @@ class Commands(object):
         _SELF: Final[str] = SEPARATOR.join(('AD',))
         PAGE: Final[str] = SEPARATOR.join((_SELF, 'P'))
         VIEW: Final[str] = SEPARATOR.join((_SELF, 'V'))
-        CATEGORY_DELETE: Final[str] = SEPARATOR.join((_SELF, 'CD'))
-        CATEGORY_PICK: Final[str] = SEPARATOR.join((_SELF, 'CP'))
         JOURNAL: Final[str] = SEPARATOR.join((_SELF, 'J'))
         JOURNAL_CLEAR: Final[str] = SEPARATOR.join((JOURNAL, 'C'))
         JOURNAL_CLEAR_CONFIRM: Final[str] = SEPARATOR.join(
@@ -123,21 +121,24 @@ class Commands(object):
         DELETE: Final[str] = SEPARATOR.join((_SELF, 'D'))
         DELETE_CONFIRM: Final[str] = SEPARATOR.join((DELETE, 'C'))
 
-    class SENDER_CHAT(str, Enum):
-        """The commands to work with sender chats."""
+    class CHAT(str, Enum):
+        """The commands to work with chats."""
 
         _SELF: Final[str] = SEPARATOR.join(('SE', 'C'))
         LIST: Final[str] = SEPARATOR.join((_SELF, 'L'))
         PAGE: Final[str] = SEPARATOR.join((_SELF, 'P'))
+        JOURNAL: Final[str] = SEPARATOR.join((_SELF, 'J'))
+        JOURNAL_CLEAR: Final[str] = SEPARATOR.join((JOURNAL, 'C'))
+        JOURNAL_CLEAR_CONFIRM: Final[str] = SEPARATOR.join(
+            (JOURNAL_CLEAR, 'C')
+        )
         REFRESH: Final[str] = SEPARATOR.join((_SELF, 'R'))
         ACTIVATE: Final[str] = SEPARATOR.join((_SELF, 'A'))
         PERIOD_CHANGE: Final[str] = SEPARATOR.join((_SELF, 'P', 'C'))
         PERIOD_RESET: Final[str] = SEPARATOR.join((_SELF, 'P', 'R'))
-        CATEGORY: Final[str] = SEPARATOR.join((_SELF, 'C'))
-        REMOVE_CATEGORY: Final[str] = SEPARATOR.join((CATEGORY, 'R'))
 
-    class SENDER_CLIENT(str, Enum):
-        """The commands to work with sender clients."""
+    class CLIENT(str, Enum):
+        """The commands to work with clients."""
 
         _SELF: Final[str] = SEPARATOR.join(('C',))
         LIST: Final[str] = SEPARATOR.join((_SELF, 'L'))

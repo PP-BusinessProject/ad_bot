@@ -29,7 +29,7 @@ from ...models.clients.user_model import UserModel, UserRole
 from ...models.misc.input_message_model import InputMessageModel
 from ...models.misc.input_model import InputModel
 from ...models.sessions.session_model import SessionModel
-from ...utils.pyrogram import auto_init
+
 from ...utils.query import Query
 from .utils import message_header
 
@@ -192,7 +192,7 @@ class SettingsMessage(object):
                 .order_by(ClientModel.phone_number != bot.phone_number)
             )
             for phone_number in phone_numbers.all():
-                async with auto_init(self.get_worker(phone_number)) as worker:
+                async with self.worker(phone_number) as worker:
                     try:
                         await worker.apply_profile_settings(bot)
                     except (Flood, Unauthorized):

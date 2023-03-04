@@ -22,6 +22,7 @@ class Invoke(object):
         sleep_threshold: float = None,
         *,
         no_updates: bool = False,
+        fetch_peers: bool = True,
     ) -> TLObject:
         """
         Send raw Telegram queries.
@@ -71,6 +72,8 @@ class Invoke(object):
             if sleep_threshold is not None
             else self.sleep_threshold,
         )
-        if peers := getattr(resp, 'users', []) + getattr(resp, 'chats', []):
-            await self.fetch_peers(peers)
+        if fetch_peers:
+            peers = getattr(resp, 'users', []) + getattr(resp, 'chats', [])
+            if peers:
+                await self.fetch_peers(peers)
         return resp

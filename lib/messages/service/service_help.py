@@ -21,7 +21,6 @@ from ...models.clients.user_model import UserModel
 from ...models.misc.input_message_model import InputMessageModel
 from ...models.misc.input_model import InputModel
 from ...models.sessions.session_model import SessionModel
-from ...utils.pyrogram import auto_init
 from ...utils.query import Query
 
 if TYPE_CHECKING:
@@ -310,11 +309,11 @@ class ServiceHelp(object):
             .order_by(ClientModel.created_at)
         )
         for phone_number in phone_numbers.all():
-            async with auto_init(self.get_worker(phone_number)) as worker:
+            async with self.worker(phone_number) as worker:
                 with suppress(RPCError):
                     user = await self.storage.Session.merge(
                         await worker.initialize_user_service(
-                            user, promote_users=self.username
+                            user, promote_users=await self.storage.user_id()
                         )
                     )
                     await self.storage.Session.commit()

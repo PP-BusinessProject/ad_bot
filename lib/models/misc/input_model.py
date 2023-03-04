@@ -94,7 +94,7 @@ class InputModel(Generic[T], Base):
     )
     message_id: Final[Column[Optional[int]]] = Column(
         Integer,
-        CheckConstraint('message_id > 0'),
+        CheckConstraint('message_id IS NULL OR message_id > 0'),
     )
     data: Final[Column[Optional[Query]]] = Column(QueryType)
     on_response: Final[Column[Optional[Callable[..., bool]]]] = Column(

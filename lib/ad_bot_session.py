@@ -1,5 +1,6 @@
-from asyncio import Event, Task, TimeoutError, current_task, wait_for
+from asyncio import Event, Task, TimeoutError, current_task
 from asyncio import sleep as asleep
+from asyncio import wait_for
 from bisect import insort
 from contextlib import suppress
 from ctypes import Union
@@ -73,16 +74,15 @@ from pyrogram.raw.types.update_short_message import UpdateShortMessage
 from pyrogram.raw.types.updates_combined import UpdatesCombined
 from pyrogram.raw.types.updates_t import Updates
 from pyrogram.raw.types.user import User
-from pyrogram.session.internals import MsgFactory, MsgId
+from pyrogram.session.internals import DataCenter, MsgFactory, MsgId
 from pyrogram.session.session import Session, log
 from pyrogram.types.messages_and_media.message import Message
 from pyrogram.utils import get_peer_id
-from pyrogram.session.internals import DataCenter
+
 from .ad_bot_auth import AdBotAuth
+from .ad_bot_connection import AdBotConnection
 from .ad_bot_handler import AdBotHandler
 from .utils.query import Query
-from .ad_bot_connection import AdBotConnection
-from pyrogram.connection.transport import TCPAbridged
 
 if TYPE_CHECKING:
     from .ad_bot_client import AdBotClient
@@ -165,7 +165,11 @@ class AdBotSession(Session):
                 if self.auth_key is None or self.auth_key_id is None:
                     self.auth_key = await self.client.storage.auth_key()
                     if self.auth_key is None:
-                        self.auth_key = await AdBotAuth(
+                        log.info(
+                            'Start creating a new auth key on DC%s',
+                            self.dc_id,
+                        )
+                        self.auth_key: bytes = await AdBotAuth(
                             self.connection
                         ).create()
                         await self.client.storage.auth_key(self.auth_key)
@@ -290,7 +294,9 @@ class AdBotSession(Session):
 
             try:
                 if len(self.stored_msg_ids) > self.STORED_MSG_IDS_MAX_SIZE:
-                    del self.stored_msg_ids[: self.STORED_MSG_IDS_MAX_SIZE // 2]
+                    del self.stored_msg_ids[
+                        : self.STORED_MSG_IDS_MAX_SIZE // 2
+                    ]
 
                 if self.stored_msg_ids:
                     if message.msg_id < self.stored_msg_ids[0]:

@@ -14,11 +14,11 @@ from sqlalchemy.orm.util import with_parent
 from sqlalchemy.sql.expression import delete, exists, select, text
 from sqlalchemy.sql.functions import count
 
-from ...models.bots.sent_ad_model import SentAdModel
+from ...models.clients.ad_chat_message_model import AdChatMessageModel
+from ...models.clients.ad_chat_model import AdChatModel
 from ...models.clients.ad_model import AdModel
 from ...models.clients.bot_model import BotModel
 from ...models.clients.user_model import UserRole
-from ...models.misc.category_model import CategoryModel
 from ...models.misc.input_message_model import InputMessageModel
 from ...models.misc.input_model import InputModel
 from ...models.misc.settings_model import SettingsModel
@@ -81,7 +81,8 @@ class AdMessage(object):
                 return data(
                     command=command,
                     args=(ad.chat_id, ad.message_id),
-                    kwargs=data.kwargs | dict(a_p=page_index),
+                    kwargs=dict(a_p=page_index),
+                    # kwargs=data.kwargs | dict(a_p=page_index),
                 )
             return Query(command, ad.chat_id, ad.message_id, a_p=page_index)
 
@@ -207,23 +208,6 @@ class AdMessage(object):
             ad.banned = not ad.banned
             await self.storage.Session.commit()
 
-        elif data.command == self.AD.CATEGORY_PICK:
-            result = await self.category_message(
-                *(chat_id, message_id, data, query_id),
-                prefix_text='Выбор категории для '
-                + message_header(self, ad, chat_id),
-                cancel_command=self.AD.PAGE,
-            )
-            if not isinstance(result, CategoryModel):
-                return result
-            ad.category_id = result.id
-            await self.storage.Session.commit()
-            data = data.__copy__(kwargs=data.kwargs | dict(s=None))
-
-        elif data.command == self.AD.CATEGORY_DELETE:
-            ad.category_id = None
-            await self.storage.Session.commit()
-
         elif data.command == self.AD.DELETE:
             return await self.send_or_edit(
                 *(chat_id, message_id),
@@ -271,6 +255,7 @@ class AdMessage(object):
                 data=query,
                 query_id=query_id,
             )
+
         elif data.command == self.AD.JOURNAL_CLEAR:
             return await self.send_or_edit(
                 *(chat_id, message_id),
@@ -288,12 +273,19 @@ class AdMessage(object):
 
         elif data.command == self.AD.JOURNAL_CLEAR_CONFIRM:
             await self.storage.Session.execute(
-                delete(SentAdModel, with_parent(ad, AdModel.sent_ads))
+                delete(
+                    AdChatMessageModel,
+                    (AdChatMessageModel.ad_chat_id == ad.chat_id)
+                    & (AdChatMessageModel.ad_message_id == ad.message_id),
+                )
             )
             await self.storage.Session.commit()
 
         sent_ads_count: int = await self.storage.Session.scalar(
-            select(count()).where(with_parent(ad, AdModel.sent_ads))
+            select(count()).filter(
+                AdChatMessageModel.ad_chat_id == ad.chat_id,
+                AdChatMessageModel.ad_message_id == ad.message_id,
+            )
         )
 
         if data.command == self.AD.JOURNAL:
@@ -306,18 +298,56 @@ class AdMessage(object):
             if not isinstance(journal_page_index, int):
                 journal_page_index = 0
 
+            journal_chat_id = data.kwargs.get('aj_c') if data else None
+            if not isinstance(journal_chat_id, int):
+                journal_chat_id = None
+
             page_list_size: int = await self.storage.Session.scalar(
                 select(SettingsModel.page_list_size).where(
                     SettingsModel.id.is_(True)
                 )
             )
             total_journal_pages = -(-sent_ads_count // page_list_size)
+            messages = await self.storage.Session.scalars(
+                select(AdChatMessageModel)
+                .filter(
+                    AdChatMessageModel.ad_chat_id == ad.chat_id,
+                    AdChatMessageModel.ad_message_id == ad.message_id,
+                )
+                .order_by(AdChatMessageModel.timestamp.desc())
+                .slice(
+                    min(journal_page_index, total_journal_pages - 1)
+                    * page_list_size,
+                    min(journal_page_index + 1, total_journal_pages)
+                    * page_list_size,
+                )
+                .options(
+                    joinedload(AdChatMessageModel.ad_chat).joinedload(
+                        AdChatModel.chat
+                    ),
+                )
+            )
+            if not (messages := messages.all()):
+                return await abort(
+                    'Для этого обьявления нет высланных сообщений.'
+                    if journal_chat_id is None
+                    else 'Для этого чата нет высланных сообщений.'
+                )
+
             return await self.send_or_edit(
                 *(chat_id, message_id),
                 text='\n'.join(
                     _
                     for _ in (
-                        message_header(self, SentAdModel(ad=ad), chat_id),
+                        message_header(
+                            self,
+                            AdChatModel(
+                                ad_chat_id=ad.chat_id,
+                                ad_message_id=ad.message_id,
+                                ad=ad,
+                            ),
+                            chat_id,
+                        ),
                         '',
                         '**Всего сообщений в журнале:** %s шт'
                         % sent_ads_count,
@@ -330,50 +360,28 @@ class AdMessage(object):
                             ' '.join(
                                 _
                                 for _ in (
-                                    sent_ad.timestamp.astimezone(
+                                    message.timestamp.astimezone(
                                         tzlocal()
                                     ).strftime(
                                         r'%H:%M:%S'
                                         if datetime.now(tzlocal()).date()
-                                        == sent_ad.timestamp.astimezone(
+                                        == message.timestamp.astimezone(
                                             tzlocal()
                                         ).date()
                                         else r'%Y-%m-%d %H:%M:%S'
                                     )
-                                    if sent_ad.timestamp is not None
-                                    else str(sent_ad.chat_id),
-                                    sent_ad.chat.title
-                                    if sent_ad.chat
+                                    if message.timestamp is not None
+                                    else str(message.chat_id),
+                                    message.ad_chat.chat.title
+                                    if message.ad_chat
                                     else None,
                                 )
                                 if _
                             ),
-                            url=sent_ad.link,
+                            url=message.link,
                         )
                     ]
-                    for sent_ad in (
-                        await self.storage.Session.scalars(
-                            select(SentAdModel)
-                            .where(with_parent(ad, AdModel.sent_ads))
-                            .order_by(SentAdModel.timestamp.desc())
-                            .slice(
-                                min(
-                                    journal_page_index,
-                                    total_journal_pages - 1,
-                                )
-                                * page_list_size,
-                                min(
-                                    journal_page_index + 1,
-                                    total_journal_pages,
-                                )
-                                * page_list_size,
-                            )
-                            .options(
-                                noload(SentAdModel.ad),
-                                joinedload(SentAdModel.chat),
-                            )
-                        )
-                    ).all()
+                    for message in messages
                 ]
                 + self.hpages(
                     journal_page_index,
@@ -387,15 +395,6 @@ class AdMessage(object):
                 )
                 + [[IKB('Назад', _query(self.AD.PAGE))]],
             )
-
-        category_list = []
-        if ad.category_id is not None:
-            category: CategoryModel = await self.storage.Session.get(
-                CategoryModel, ad.category_id
-            )
-            category_list.append(category.name)
-            while category.parent is not None:
-                category_list.append((category := category.parent).name)
 
         return await self.send_or_edit(
             *(chat_id, message_id),
@@ -412,11 +411,6 @@ class AdMessage(object):
                         else 'Включено'
                         if ad.active
                         else 'Отключено'
-                    ),
-                    '**Текущая категория:** {}'.format(
-                        ' > '.join(reversed(category_list))
-                        if category_list
-                        else '__Отсутствует__'
                     ),
                     '**Количество пересланных сообщений:** %s шт'
                     % sent_ads_count,
@@ -438,24 +432,6 @@ class AdMessage(object):
                         [
                             IKB('Обновить', _query(self.AD.PAGE)),
                             IKB('Просмотреть', _query(self.AD.VIEW)),
-                        ],
-                        (
-                            [
-                                IKB(
-                                    'Удалить категорию',
-                                    _query(self.AD.CATEGORY_DELETE),
-                                )
-                            ]
-                            if ad.category_id is not None
-                            else []
-                        )
-                        + [
-                            IKB(
-                                'Выбрать категорию'
-                                if ad.category_id is None
-                                else 'Изменить категорию',
-                                _query(self.AD.CATEGORY_PICK),
-                            )
                         ],
                     ]
                     if not ad.corrupted
@@ -498,6 +474,10 @@ class AdMessage(object):
                     else []
                 )
                 + [
+                    [
+                        IKB('Добавить чаты', _query(self.CHAT._SELF)),
+                        IKB('Список чатов', _query(self.CHAT.LIST)),
+                    ],
                     [IKB('Удалить', _query(self.AD.DELETE))],
                     [
                         IKB(
