@@ -248,9 +248,7 @@ class BotMessage(object):
             select(count()).where(BotModel.owner_id == bot_owner_id)
         )
         if not bots_count and bot_owner_id != chat_id:
-            return await abort(
-                'У данного пользователя нет подключенных ботов.'
-            )
+            return await abort('У данного пользователя нет подключенных ботов.')
 
         elif (data is None or data.command == self.BOT._SELF) or (
             not bots_count and data.command == self.BOT.PAGE
@@ -272,7 +270,6 @@ class BotMessage(object):
                 async with self.worker(phone_number) as worker:
                     with suppress(FloodWait):
                         try:
-                            self.initialize_user_service
                             owner = await self.storage.Session.merge(
                                 await worker.initialize_user_service(
                                     owner,
@@ -300,6 +297,7 @@ class BotMessage(object):
                 id=bots_count,
                 owner_id=bot_owner_id,
                 owner=owner,
+                phone_number=phone_number,
             )
             ads_count = banned_ads_count = 0
             if bots_count:
@@ -552,15 +550,11 @@ class BotMessage(object):
                         if _ is not None
                     ),
                     '__Добавлен:__ '
-                    + bot.created_at.astimezone().strftime(
-                        r'%Y-%m-%d %H:%M:%S'
-                    )
+                    + bot.created_at.astimezone().strftime(r'%Y-%m-%d %H:%M:%S')
                     if bot.created_at is not None
                     else None,
                     '__Обновлен:__ '
-                    + bot.updated_at.astimezone().strftime(
-                        r'%Y-%m-%d %H:%M:%S'
-                    )
+                    + bot.updated_at.astimezone().strftime(r'%Y-%m-%d %H:%M:%S')
                     if bot.updated_at is not None
                     else None,
                     '\n'.join(

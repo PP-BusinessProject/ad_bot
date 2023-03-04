@@ -60,7 +60,7 @@ async def main() -> None:
                         url='postgresql+asyncpg://'
                         + environ.get(
                             'DATABASE_URL',
-                            'postgres:postgres@localhost:5433/ad_bot',
+                            'timmy:postgres@localhost:5432/ad_bot',
                         )
                         .split('://')[-1]
                         .split('?')[0],

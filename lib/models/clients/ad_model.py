@@ -1,15 +1,15 @@
 """The module that provides an `AdModel`."""
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Final, List, Optional, Self, Type
 
-from sqlalchemy import CheckConstraint
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.expression import ClauseElement, and_
-from sqlalchemy.sql.schema import Column, ForeignKeyConstraint
-from sqlalchemy.sql.sqltypes import Boolean, Integer
+from sqlalchemy.sql.schema import Column, ForeignKeyConstraint, CheckConstraint
+from sqlalchemy.sql.sqltypes import Boolean, Integer, DateTime
 
 from .._mixins import Timestamped
 from ..base_interface import Base, TableArgs
@@ -80,9 +80,7 @@ class AdModel(Timestamped, Base):
     )
     confirm_message_id: Column[Optional[int]] = Column(
         Integer,
-        CheckConstraint(
-            'confirm_message_id IS NULL OR confirm_message_id > 0'
-        ),
+        CheckConstraint('confirm_message_id IS NULL OR confirm_message_id > 0'),
     )
     active: Column[bool] = Column(
         Boolean(create_constraint=True),
@@ -99,6 +97,7 @@ class AdModel(Timestamped, Base):
         nullable=False,
         default=False,
     )
+    last_sent_at: Column[Optional[datetime]] = Column(DateTime(timezone=True))
     owner_bot: Mapped['RelationshipProperty[BotModel]'] = relationship(
         'BotModel',
         back_populates='ads',

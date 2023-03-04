@@ -26,11 +26,11 @@ fly proxy 15432:5432 --app ad-bot-db
 
 ### Main Database URL
 
-postgres://postgres:HqI4MmZOyJxzpWS@ad-bot-db.flycast:5432
+postgres://postgres:TmmonCDUvKuUA8w@[fdaa:1:6c69:0:1::a]:5432
 
 ### AdBot Database URL
 
-DATABASE_URL=postgres://ad_bot:xiSQs6xqwYxjRoH@ad-bot-db.flycast:5432/ad_bot?sslmode=disable
+DATABASE_URL=postgres://ad_bot:LISuyHnCGbrLI79@[fdaa:1:6c69:0:1::a]:5432/ad_bot?sslmode=disable
 
 ### Other Credentials
 

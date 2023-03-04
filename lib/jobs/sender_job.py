@@ -4,8 +4,7 @@ from asyncio import Lock
 from contextlib import suppress
 from datetime import datetime, timedelta
 from logging import getLogger
-from time import monotonic
-from typing import TYPE_CHECKING, Dict, Final, Optional, Tuple
+from typing import TYPE_CHECKING, ClassVar, Iterable, Optional, Set, Tuple
 
 from apscheduler.job import Job
 from apscheduler.triggers.interval import IntervalTrigger
@@ -31,7 +30,7 @@ from pyrogram.types.user_and_chats.chat import Chat
 from sqlalchemy.exc import IntegrityError, MissingGreenlet
 from sqlalchemy.orm.strategy_options import contains_eager, joinedload, noload
 from sqlalchemy.orm.util import with_parent
-from sqlalchemy.sql.expression import nullsfirst, or_, select, update
+from sqlalchemy.sql.expression import exists, or_, select, update
 from sqlalchemy.sql.functions import max as sql_max
 from sqlalchemy.sql.functions import now
 from sqlalchemy.sql.sqltypes import Integer
@@ -51,8 +50,8 @@ log = getLogger(__name__)
 
 
 class SenderJob(object):
-    _sender_lock: Final[Lock] = Lock()
-    _active_senders: Final[Dict[Tuple[int, int], Optional[float]]] = {}
+    _sender_lock: ClassVar[Lock] = Lock()
+    _active_senders: ClassVar[Set[Tuple[int, int]]] = set()
 
     def sender_job_init(
         self: 'AdBotClient',
@@ -72,19 +71,9 @@ class SenderJob(object):
             next_run_time=datetime.now() if run_now else undefined,
         )
 
-    async def sender_job(self: 'AdBotClient', /) -> None:
+    async def sender_job(self: 'AdBotClient', /) -> bool:
         # Следующий за последним бот в следующее за последним обьявление в
         # следующий за последним чат для этого обьявления
-        sent_ads_subquery = (
-            select(
-                AdChatMessageModel.ad_chat_id,
-                sql_max(AdChatMessageModel.timestamp).label('timestamp'),
-            )
-            .group_by(AdChatMessageModel.ad_chat_id)
-            .order_by(sql_max(AdChatMessageModel.timestamp))
-            .subquery()
-            .alias()
-        )
         bots = await self.storage.Session.execute(
             select(BotModel, PeerModel)
             .join(BotModel.owner)
@@ -94,40 +83,24 @@ class SenderJob(object):
                 & (PeerModel.id == UserModel.service_id),
                 isouter=True,
             )
-            .join(
-                sent_ads_subquery,
-                sent_ads_subquery.c.ad_chat_id == UserModel.service_id,
-                isouter=True,
-            )
             .filter(
-                BotModel.confirmed,
-                BotModel.phone_number.is_not(None),
                 UserModel.is_subscribed,
                 UserModel.service_id.is_not(None),
+                BotModel.confirmed,
+                BotModel.phone_number.is_not(None),
             )
-            .order_by(nullsfirst(sent_ads_subquery.c.timestamp))
+            .order_by(BotModel.last_sent_at.nullsfirst(), BotModel.created_at)
             .options(contains_eager(BotModel.owner))
             .execution_options(populate_existing=True)
         )
         if not (bots := bots.all()):
-            return log.warning('No bots found for sending!')
-        async with self._sender_lock:
-            bots = sorted(
-                bots,
-                key=lambda bot: self._active_senders.get(
-                    (bot[0].owner_id, bot[0].id),
-                    -1,
-                )
-                or float('inf'),
-            )
+            log.warning('No bots found for sending!')
+            return False
         for bot, service_peer in bots:
-            key = bot.owner_id, bot.id
-            async with self._sender_lock:
-                if key in self._active_senders and (
-                    self._active_senders[key] is None
-                ):
+            async with (cls := self.__class__)._sender_lock:
+                if (key := (bot.owner_id, bot.id)) in cls._active_senders:
                     continue
-                self._active_senders[key] = None
+                cls._active_senders.add(key)
 
             try:
                 # Sometimes expires
@@ -188,7 +161,8 @@ class SenderJob(object):
                             bot.owner.service_id,
                         )
                         continue
-                    await self._sender_job(worker, bot, service_peer)
+                    if not await self._sender_job(worker, bot, service_peer):
+                        continue
                     # elif phone_number == bot.phone_number:
                     #     await self._sender_job(worker, bot)
                     #     break
@@ -214,7 +188,7 @@ class SenderJob(object):
                     bot.phone_number,
                     e.value,
                 )
-                continue
+                break
             except OSError as _:
                 async with self.worker(
                     bot.phone_number, start=False, stop=True
@@ -226,8 +200,10 @@ class SenderJob(object):
                     bot.phone_number,
                     bot.id,
                 )
-                async with self._sender_lock:
-                    self._active_senders[key] = monotonic()
+                bot.last_sent_at = datetime.now(tzlocal())
+                await self.storage.Session.commit()
+                async with cls._sender_lock:
+                    cls._active_senders.remove(key)
 
                 # log.info(f'{bot} assigned client with number {phone_number}!')
                 # bot.phone_number = phone_number
@@ -236,7 +212,7 @@ class SenderJob(object):
                 # break
             # else:
             #     continue
-            break
+            return True
         else:
             if len(bots) > 1:
                 log.info('All %s bots are already working!', len(bots))
@@ -249,36 +225,11 @@ class SenderJob(object):
         bot: BotModel,
         /,
         service_peer: Optional[PeerModel] = None,
-    ) -> None:
-        ad: AdModel
-        last_ad_chat_id: Optional[int]
-        sent_ads_subquery = (
-            select(
-                AdChatMessageModel.ad_chat_id,
-                AdChatMessageModel.ad_message_id,
-                AdChatMessageModel.chat_id,
-                sql_max(AdChatMessageModel.timestamp).label('timestamp'),
-            )
-            .group_by(
-                AdChatMessageModel.ad_chat_id,
-                AdChatMessageModel.ad_message_id,
-                AdChatMessageModel.chat_id,
-            )
-            .order_by(sql_max(AdChatMessageModel.timestamp))
-            .subquery()
-            .alias()
-        )
-        ads = await self.storage.Session.execute(
-            select(AdModel, sent_ads_subquery.c.chat_id)
-            .join(
-                sent_ads_subquery,
-                (sent_ads_subquery.c.ad_chat_id == AdModel.chat_id)
-                & (sent_ads_subquery.c.ad_message_id == AdModel.message_id),
-                isouter=True,
-            )
+    ) -> bool:
+        ads = await self.storage.Session.scalars(
+            select(AdModel)
             .where(with_parent(bot, BotModel.ads) & AdModel.valid)
-            .order_by(nullsfirst(sent_ads_subquery.c.timestamp))
-            .options(noload(AdModel.owner_bot))
+            .order_by(AdModel.last_sent_at.nullsfirst(), AdModel.created_at)
         )
         if not (ads := ads.all()):
             log.warning(
@@ -286,136 +237,141 @@ class SenderJob(object):
                 bot.phone_number,
                 bot.id,
             )
-        for ad, last_ad_chat_id in ads:
-            _chat: Optional[Chat] = None
-            sent_ad_chats_subquery = (
-                select(
-                    AdChatMessageModel.chat_id,
-                    sql_max(AdChatMessageModel.timestamp).label('timestamp'),
-                )
-                .group_by(AdChatMessageModel.chat_id)
-                .order_by(sql_max(AdChatMessageModel.timestamp))
-                .subquery()
-                .alias()
-            )
-            sent_ad_chats_query = (
-                select(AdChatModel, PeerModel)
-                .join(
-                    PeerModel,
-                    (PeerModel.session_phone_number == bot.phone_number)
-                    & (PeerModel.id == AdChatModel.chat_id),
-                    isouter=True,
-                )
-                .join(sent_ad_chats_subquery, isouter=True)
-                .where(with_parent(ad, AdModel.chats))
-                .filter(
-                    AdChatModel.active,
-                    or_(
-                        AdChatModel.slowmode_wait.is_(None),
-                        now() > AdChatModel.slowmode_wait,
-                    ),
-                    or_(
-                        sent_ad_chats_subquery.c.timestamp.is_(None),
-                        now() - sent_ad_chats_subquery.c.timestamp
-                        > AdChatModel.period,
-                    ),
-                )
-                .options(joinedload(AdChatModel.chat))
-            )
-            ad_chats = await self.storage.Session.execute(
-                sent_ad_chats_query.order_by(
-                    (AdChatModel.chat_id <= last_ad_chat_id).cast(Integer),
-                    nullsfirst(sent_ad_chats_subquery.c.timestamp),
-                )
-                if last_ad_chat_id is not None
-                else sent_ad_chats_query.order_by(
-                    nullsfirst(sent_ad_chats_subquery.c.timestamp),
-                )
-            )
-            if not (ad_chats := ad_chats.all()):
-                log.warning(
-                    '[%s] No chats found for ad #%s of bot #%s!',
-                    bot.phone_number,
-                    ad.message_id,
-                    bot.id,
-                )
-            for ad_chat, peer in ad_chats:
-                try:
-                    _chat = await worker.check_chats(
-                        (
-                            peer or ad_chat.chat.id,
-                            ad_chat.chat.invite_link,
-                            f'@{ad_chat.chat.username}'
-                            if ad_chat.chat.username
-                            else None,
+            return False
+        for ad in ads:
+            ad_chats = None
+            try:
+                ad_chats = await self.storage.Session.execute(
+                    select(AdChatModel, PeerModel)
+                    .join(
+                        PeerModel,
+                        (PeerModel.session_phone_number == bot.phone_number)
+                        & (PeerModel.id == AdChatModel.chat_id),
+                        isouter=True,
+                    )
+                    .where(with_parent(ad, AdModel.chats))
+                    .filter(
+                        AdChatModel.active,
+                        or_(
+                            AdChatModel.slowmode_wait.is_(None),
+                            now() > AdChatModel.slowmode_wait,
                         ),
-                        folder_id=1,
-                        fetch_peers=peer is None,
+                        or_(
+                            AdChatModel.last_sent_at.is_(None),
+                            now() - AdChatModel.last_sent_at
+                            > AdChatModel.period,
+                        ),
                     )
-                    if _chat is None:
-                        continue
-                    sent_msg = await worker.forward_messages(
-                        peer or _chat.id,
-                        service_peer or ad.chat_id,
-                        ad.message_id,
-                        drop_author=True,
+                    .order_by(
+                        AdChatModel.last_sent_at.nullsfirst(),
+                        AdChatModel.created_at,
                     )
-                    sent_ad = AdChatMessageModel(
-                        ad_chat_id=ad.chat_id,
-                        ad_message_id=ad.message_id,
-                        chat_id=_chat.id,
-                        message_id=sent_msg.id,
-                        link=sent_msg.link,
-                        timestamp=sent_msg.date,
-                    )
-                    log.info(
-                        '[%s] Sent ad #%s of bot #%s to `%s`:%s.',
+                    .options(joinedload(AdChatModel.chat))
+                )
+                if not (ad_chats := ad_chats.all()):
+                    log.warning(
+                        '[%s] No chats found for ad #%s of bot #%s!',
                         bot.phone_number,
                         ad.message_id,
                         bot.id,
-                        ad_chat.chat.title,
-                        sent_msg.id,
                     )
-                    with suppress(IntegrityError):
-                        self.storage.Session.add(sent_ad)
-                        await self.storage.Session.commit()
-                except (MessageIdInvalid, MsgIdInvalid):
-                    ad.corrupted = True
-                    await self.storage.Session.commit()
-                except SlowmodeWait as e:
-                    log.warning(
-                        '[%s] `%s` slowmode for %s seconds!',
-                        bot.phone_number,
-                        ad_chat.chat.title,
-                        e.value,
-                    )
-                    ad_chat.slowmode_wait = datetime.now(
-                        tzlocal()
-                    ) + timedelta(seconds=e.value)
-                    await self.storage.Session.commit()
                     continue
-                except (
-                    PeerIdInvalid,
-                    ChannelBanned,
-                    ChannelPrivate,
-                    ChatAdminRequired,
-                    ChatWriteForbidden,
-                    ChatRestricted,
-                    UserBannedInChannel,
-                ) as e:
-                    log.warning(
-                        '[%s] `%s` banned with `%s`!',
-                        bot.phone_number,
-                        ad_chat.chat.title,
-                        e.__class__.__name__,
+                for ad_chat, chat_peer in ad_chats:
+                    await self._sender_chat_job(
+                        worker, ad_chat, service_peer, chat_peer
                     )
-                    ad_chat.active = False
-                    ad_chat.deactivated_cause = (
-                        ChatDeactivatedCause.from_exception(e)
-                    )
-                    await self.storage.Session.commit()
-                    continue
-                # break
-            else:
-                continue
-            # break
+            finally:
+                log.info(
+                    '[%s] Finished sending ad #%s of bot #%s%s!',
+                    bot.phone_number,
+                    ad.message_id,
+                    bot.id,
+                    ' in %s chat%s'
+                    % (len(ad_chats), 's' if len(ad_chats) > 1 else '')
+                    if isinstance(ad_chats, Iterable) and ad_chats
+                    else '',
+                )
+                ad.last_sent_at = datetime.now(tzlocal())
+                await self.storage.Session.commit()
+        return True
+
+    async def _sender_chat_job(
+        self: 'AdBotClient',
+        worker: 'AdBotClient',
+        ad_chat: AdChatModel,
+        /,
+        service_peer: Optional[PeerModel] = None,
+        chat_peer: Optional[PeerModel] = None,
+    ) -> bool:
+        try:
+            _chat = await worker.check_chats(
+                (
+                    chat_peer or ad_chat.chat.id,
+                    ad_chat.chat.invite_link,
+                    f'@{ad_chat.chat.username}'
+                    if ad_chat.chat.username
+                    else None,
+                ),
+                folder_id=1,
+                fetch_peers=chat_peer is None,
+            )
+            if _chat is None:
+                return False
+            sent_msg = await worker.forward_messages(
+                chat_peer or _chat.id,
+                service_peer or ad_chat.ad_chat_id,
+                ad_chat.ad_message_id,
+                drop_author=True,
+            )
+            sent_ad = AdChatMessageModel(
+                ad_chat_id=ad_chat.ad_chat_id,
+                ad_message_id=ad_chat.ad_message_id,
+                chat_id=_chat.id,
+                message_id=sent_msg.id,
+                link=sent_msg.link,
+                timestamp=sent_msg.date,
+            )
+            log.info(
+                '[%s] Sent ad #%s of bot #%s to `%s`:%s.',
+                ad_chat.ad.owner_bot.phone_number,
+                ad_chat.ad_message_id,
+                ad_chat.ad.owner_bot.id,
+                ad_chat.chat.title,
+                sent_msg.id,
+            )
+            self.storage.Session.add(sent_ad)
+            return True
+        except (MessageIdInvalid, MsgIdInvalid):
+            ad_chat.ad.corrupted = True
+        except SlowmodeWait as e:
+            log.warning(
+                '[%s] `%s` slowmode for %s seconds!',
+                ad_chat.ad.owner_bot.phone_number,
+                ad_chat.chat.title,
+                e.value,
+            )
+            ad_chat.slowmode_wait = datetime.now(tzlocal()) + timedelta(
+                seconds=e.value
+            )
+        except (
+            PeerIdInvalid,
+            ChannelBanned,
+            ChannelPrivate,
+            ChatAdminRequired,
+            ChatWriteForbidden,
+            ChatRestricted,
+            UserBannedInChannel,
+        ) as e:
+            log.warning(
+                '[%s] `%s` banned with `%s`!',
+                ad_chat.ad.owner_bot.phone_number,
+                ad_chat.chat.title,
+                e.__class__.__name__,
+            )
+            ad_chat.active = False
+            ad_chat.deactivated_cause = ChatDeactivatedCause.from_exception(e)
+        finally:
+            with suppress(IntegrityError):
+                ad_chat.last_sent_at = datetime.now(tzlocal())
+                await self.storage.Session.commit()
+        return False

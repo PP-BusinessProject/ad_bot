@@ -1,15 +1,16 @@
 """The module that provides a `BotModel`."""
 
+from datetime import datetime
 from typing import TYPE_CHECKING, Final, List, Optional, Self, Type
 
-from sqlalchemy import CheckConstraint
+from sqlalchemy.sql.schema import CheckConstraint
 from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
 from sqlalchemy.sql.expression import ClauseElement
 from sqlalchemy.sql.schema import Column, ForeignKey
-from sqlalchemy.sql.sqltypes import Integer, String
+from sqlalchemy.sql.sqltypes import Integer, String, DateTime
 
 from .._constraints import MAX_NAME_LENGTH, MAX_USERNAME_LENGTH
 from .._mixins import Timestamped
@@ -136,6 +137,7 @@ class BotModel(Timestamped, Base):
         Integer,
         CheckConstraint('confirm_message_id > 0'),
     )
+    last_sent_at: Column[Optional[datetime]] = Column(DateTime(timezone=True))
     owner: Mapped['RelationshipProperty[UserModel]'] = relationship(
         'UserModel',
         back_populates='bots',

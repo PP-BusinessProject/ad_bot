@@ -166,6 +166,7 @@ class ClientMessage(object):
                 data=data,
                 on_response=self._add_client,
                 on_finished=self._add_client_on_finished,
+                do_add_message=True,
                 # user_role=UserRole.USER,
                 query_pattern='|'.join(
                     (
@@ -178,16 +179,11 @@ class ClientMessage(object):
                 ),
             )
             self.storage.Session.add(input)
-            self.storage.Session.add(
-                InputMessageModel(message_id=message_id, input=input)
-            )
             await self.storage.Session.commit()
             return await self.send_or_edit(
                 *(chat_id, message_id),
                 'Введите номер телефона аккаунта для бота.',
-                reply_markup=IKM(
-                    [[IKB('Отменить', Query(self.INPUT.CANCEL))]]
-                ),
+                reply_markup=IKM([[IKB('Отменить', Query(self.INPUT.CANCEL))]]),
             )
 
         sender = await self.storage.Session.get(ClientModel, data.args)
@@ -237,9 +233,7 @@ class ClientMessage(object):
             try:
                 async with self.worker(sender.phone_number) as worker:
                     chat_dialogs = await worker.get_peer_dialogs(chat_ids)
-                    valid = sum(
-                        d.top_message is not None for d in chat_dialogs
-                    )
+                    valid = sum(d.top_message is not None for d in chat_dialogs)
                     word = self.morph.plural(len(chat_ids), 'чат', case='gent')
                     return await abort(
                         f'Прогрето {valid} из {len(chat_ids)} {word}.'

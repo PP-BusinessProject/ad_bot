@@ -13,9 +13,8 @@ from pyrogram.errors.exceptions.bad_request_400 import (
     PeerIdInvalid,
     UserBannedInChannel,
 )
-from pyrogram.errors.exceptions.flood_420 import SlowmodeWait
+
 from pyrogram.errors.exceptions.forbidden_403 import ChatWriteForbidden
-from sqlalchemy import CheckConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
@@ -91,12 +90,12 @@ class AdChatModel(Timestamped, Base):
         nullable=False,
         default=True,
     )
+    last_sent_at: Column[Optional[datetime]] = Column(DateTime(timezone=True))
     deactivated_cause: Final[Column[Optional[ChatDeactivatedCause]]] = Column(
         Enum(ChatDeactivatedCause),
     )
     slowmode_wait: Final[Column[Optional[datetime]]] = Column(
-        DateTime(timezone=True),
-        CheckConstraint("slowmode_wait IS NULL OR slowmode_wait > now()"),
+        DateTime(timezone=True)
     )
 
     __table_args__: Final[TableArgs] = (
