@@ -13,13 +13,23 @@ from pyrogram.errors.exceptions.bad_request_400 import (
     PeerIdInvalid,
     UserBannedInChannel,
 )
-
 from pyrogram.errors.exceptions.forbidden_403 import ChatWriteForbidden
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
-from sqlalchemy.sql.schema import Column, ForeignKey, ForeignKeyConstraint
-from sqlalchemy.sql.sqltypes import Boolean, DateTime, Enum, Interval
+from sqlalchemy.sql.schema import (
+    CheckConstraint,
+    Column,
+    ForeignKey,
+    ForeignKeyConstraint,
+)
+from sqlalchemy.sql.sqltypes import (
+    Boolean,
+    DateTime,
+    Enum,
+    Interval,
+    SmallInteger,
+)
 
 from .._mixins import Timestamped
 from ..base_interface import Base, TableArgs
@@ -80,6 +90,12 @@ class AdChatModel(Timestamped, Base):
         ForeignKey(ChatModel.id, onupdate='CASCADE', ondelete='CASCADE'),
         primary_key=True,
     )
+    max_scheduled_count: Final[Column[int]] = Column(
+        SmallInteger,
+        CheckConstraint('max_scheduled_count > 0'),
+        nullable=False,
+        default=100,
+    )
     period: Final[Column[timedelta]] = Column(
         Interval(second_precision=0),
         nullable=False,
@@ -110,14 +126,14 @@ class AdChatModel(Timestamped, Base):
     ad: Mapped['RelationshipProperty[AdModel]'] = relationship(
         'AdModel',
         back_populates='chats',
-        lazy='joined',
+        lazy='noload',
         cascade='save-update',
         uselist=False,
     )
     chat: Mapped['RelationshipProperty[ChatModel]'] = relationship(
         'ChatModel',
         back_populates='ads',
-        lazy='joined',
+        lazy='noload',
         cascade='save-update',
         uselist=False,
     )

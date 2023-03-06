@@ -16,7 +16,7 @@ from pyrogram.types import InlineKeyboardButton as IKB
 from pyrogram.types import InlineKeyboardMarkup as IKM
 from pyrogram.types import Message
 from pyrogram.types.user_and_chats.chat import Chat
-from sqlalchemy.orm.strategy_options import contains_eager, joinedload
+from sqlalchemy.orm.strategy_options import contains_eager
 from sqlalchemy.orm.util import with_parent
 from sqlalchemy.sql.expression import exists, select, text
 from sqlalchemy.sql.functions import count
@@ -336,11 +336,11 @@ class ChatMessage(object):
                 reply_markup=IKM([[IKB('Отменить', self.INPUT.CANCEL)]]),
             )
 
-        sent_ads_count: int = await self.storage.Session.scalar(
+        messages_count: int = await self.storage.Session.scalar(
             select(count()).where(with_parent(ad_chat, AdChatModel.messages))
         )
         if data.command == self.CHAT.JOURNAL:
-            if not sent_ads_count:
+            if not messages_count:
                 return await abort(
                     'У этого объявления нет пересланных сообщений.'
                 )
@@ -354,7 +354,7 @@ class ChatMessage(object):
                     SettingsModel.id.is_(True)
                 )
             )
-            total_journal_pages = -(-sent_ads_count // page_list_size)
+            total_journal_pages = -(-messages_count // page_list_size)
             messages = await self.storage.Session.scalars(
                 select(AdChatMessageModel)
                 .where(with_parent(ad_chat, AdChatModel.messages))
@@ -370,6 +370,12 @@ class ChatMessage(object):
             if not (messages := messages.all()):
                 return await abort('Для этого чата нет высланных сообщений.')
 
+            scheduled_messages_count: int = await self.storage.Session.scalar(
+                select(count()).filter(
+                    with_parent(ad_chat, AdChatModel.messages),
+                    AdChatMessageModel.scheduled,
+                )
+            )
             return await self.send_or_edit(
                 *(chat_id, message_id),
                 text='\n'.join(
@@ -377,8 +383,9 @@ class ChatMessage(object):
                     for _ in (
                         message_header(self, ad_chat, chat_id),
                         '',
-                        '**Всего сообщений в журнале:** %s шт'
-                        % sent_ads_count,
+                        '**Всего сообщений в журнале:** %s шт '
+                        '(Запланировано %s шт)'
+                        % (messages_count, scheduled_messages_count),
                     )
                     if _ is not None
                 ),
@@ -481,7 +488,7 @@ class ChatMessage(object):
                     if ad_chat.deactivated_cause is not None
                     else None,
                     '**Количество пересланных сообщений:** %s шт'
-                    % sent_ads_count,
+                    % messages_count,
                     '__Добавлен:__ '
                     + ad_chat.created_at.astimezone().strftime(
                         r'%Y-%m-%d %H:%M:%S'
