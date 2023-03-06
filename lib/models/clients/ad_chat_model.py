@@ -121,7 +121,7 @@ class AdChatModel(Timestamped, Base):
         cascade='save-update',
         uselist=False,
     )
-    sent_ads: Mapped[
+    messages: Mapped[
         'RelationshipProperty[List[AdChatMessageModel]]'
     ] = relationship(
         'AdChatMessageModel',

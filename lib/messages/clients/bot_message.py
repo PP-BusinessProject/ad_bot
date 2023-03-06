@@ -248,7 +248,9 @@ class BotMessage(object):
             select(count()).where(BotModel.owner_id == bot_owner_id)
         )
         if not bots_count and bot_owner_id != chat_id:
-            return await abort('У данного пользователя нет подключенных ботов.')
+            return await abort(
+                'У данного пользователя нет подключенных ботов.'
+            )
 
         elif (data is None or data.command == self.BOT._SELF) or (
             not bots_count and data.command == self.BOT.PAGE
@@ -256,14 +258,12 @@ class BotMessage(object):
             owner = await self.storage.Session.get(UserModel, bot_owner_id)
             phone_numbers = await self.storage.Session.scalars(
                 select(ClientModel.phone_number)
-                .where(ClientModel.valid)
-                .where(
-                    exists(text('NULL'))
-                    .where(
-                        SessionModel.phone_number == ClientModel.phone_number
-                    )
-                    .where(SessionModel.user_id == chat_id),
+                .join(
+                    SessionModel,
+                    SessionModel.phone_number == ClientModel.phone_number,
+                    isouter=True,
                 )
+                .filter(ClientModel.valid, SessionModel.user_id == chat_id)
                 .order_by(ClientModel.created_at)
             )
             for phone_number in phone_numbers.all():
@@ -550,11 +550,15 @@ class BotMessage(object):
                         if _ is not None
                     ),
                     '__Добавлен:__ '
-                    + bot.created_at.astimezone().strftime(r'%Y-%m-%d %H:%M:%S')
+                    + bot.created_at.astimezone().strftime(
+                        r'%Y-%m-%d %H:%M:%S'
+                    )
                     if bot.created_at is not None
                     else None,
                     '__Обновлен:__ '
-                    + bot.updated_at.astimezone().strftime(r'%Y-%m-%d %H:%M:%S')
+                    + bot.updated_at.astimezone().strftime(
+                        r'%Y-%m-%d %H:%M:%S'
+                    )
                     if bot.updated_at is not None
                     else None,
                     '\n'.join(

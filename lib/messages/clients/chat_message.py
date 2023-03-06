@@ -271,7 +271,6 @@ class ChatMessage(object):
                                 if ad_chat.chat.username
                                 else None,
                             ),
-                            folder_id=1,
                         )
                         if _chat is None:
                             return await abort(
@@ -338,7 +337,7 @@ class ChatMessage(object):
             )
 
         sent_ads_count: int = await self.storage.Session.scalar(
-            select(count()).where(with_parent(ad_chat, AdChatModel.sent_ads))
+            select(count()).where(with_parent(ad_chat, AdChatModel.messages))
         )
         if data.command == self.CHAT.JOURNAL:
             if not sent_ads_count:
@@ -358,7 +357,7 @@ class ChatMessage(object):
             total_journal_pages = -(-sent_ads_count // page_list_size)
             messages = await self.storage.Session.scalars(
                 select(AdChatMessageModel)
-                .where(with_parent(ad_chat, AdChatModel.sent_ads))
+                .where(with_parent(ad_chat, AdChatModel.messages))
                 .order_by(AdChatMessageModel.timestamp.desc())
                 .slice(
                     min(journal_page_index, total_journal_pages - 1)
@@ -768,10 +767,16 @@ class ChatMessage(object):
                 'На данный момент нет свободных ботов для обработки чатов.'
             )
 
-        async def update_chat(chat: Chat, chat_link: str, /) -> None:
+        async def update_chat(
+            worker: 'AdBotClient',
+            chat: Chat,
+            chat_link: str,
+            /,
+        ) -> None:
             if not chat.invite_link and self.INVITE_LINK_RE.search(chat_link):
                 chat.invite_link = chat_link
 
+            await worker.archive_chats(chat.id)
             ad_chat: Optional[ChatModel] = await self.storage.Session.get(
                 AdChatModel, (*input.data.args, chat.id)
             )
@@ -827,7 +832,6 @@ class ChatMessage(object):
             async with self.worker(phone_number) as worker:
                 async for chat in worker.iter_check_chats(
                     check_chats[chat_index + 1 :],
-                    folder_id=1,
                     yield_on_flood=True,
                 ):
                     if isinstance(e := chat, CheckChatsFloodWait):
@@ -838,7 +842,7 @@ class ChatMessage(object):
                                 can_update.value = True
                                 check_chats.remove(chat)
                                 await update_chat(
-                                    e.checked_chats[chat], chat[0]
+                                    worker, e.checked_chats[chat], chat[0]
                                 )
                         break
 
@@ -849,7 +853,9 @@ class ChatMessage(object):
                         continue
 
                     try:
-                        await update_chat(chat, check_chats[chat_index][0])
+                        await update_chat(
+                            worker, chat, check_chats[chat_index][0]
+                        )
                     finally:
                         successes.value += 1
                         can_update.value = True

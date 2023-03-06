@@ -3,13 +3,16 @@
 from datetime import datetime
 from typing import ClassVar, Final, Optional, Self, Type
 
+from dateutil.tz.tz import tzlocal
 from pyrogram.client import Client
 from pyrogram.types import Message
 from sqlalchemy import CheckConstraint
+from sqlalchemy.ext.hybrid import hybrid_property
 from sqlalchemy.orm import relationship
 from sqlalchemy.orm.base import Mapped
 from sqlalchemy.orm.relationships import RelationshipProperty
-from sqlalchemy.sql.schema import Column, ForeignKeyConstraint
+from sqlalchemy.sql.functions import now
+from sqlalchemy.sql.schema import ClauseElement, Column, ForeignKeyConstraint
 from sqlalchemy.sql.sqltypes import DateTime, String
 
 from ..base_interface import Base, TableArgs
@@ -69,7 +72,7 @@ class AdChatMessageModel(Base):
 
     ad_chat: Mapped['RelationshipProperty[AdChatModel]'] = relationship(
         'AdChatModel',
-        back_populates='sent_ads',
+        back_populates='messages',
         lazy='noload',
         cascade='save-update',
         uselist=False,
@@ -87,6 +90,15 @@ class AdChatMessageModel(Base):
             ondelete='CASCADE',
         ),
     )
+
+    @hybrid_property
+    def scheduled(self: Self, /) -> bool:
+        """If this instance is valid."""
+        return self.timestamp > datetime.now(tzlocal())
+
+    @scheduled.expression
+    def scheduled(cls: Type[Self], /) -> ClauseElement:  # noqa: N805
+        return cls.timestamp > now()
 
     _instance: ClassVar[Optional[Message]] = None
 

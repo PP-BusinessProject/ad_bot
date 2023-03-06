@@ -6,9 +6,11 @@ from typing import (
     TYPE_CHECKING,
     Any,
     AsyncGenerator,
+    Dict,
     Final,
     Generator,
     Iterable,
+    List,
     Optional,
     Self,
     Union,
@@ -54,7 +56,6 @@ class CheckChats(object):
         self: Self,
         chats: CheckChat,
         /,
-        folder_id: Optional[int] = None,
         *,
         fetch_peers: bool = True,
     ) -> Optional[Chat]:
@@ -65,7 +66,6 @@ class CheckChats(object):
         self: Self,
         chats: Iterable[CheckChat],
         /,
-        folder_id: Optional[int] = None,
         *,
         fetch_peers: bool = True,
     ) -> list[Optional[Chat]]:
@@ -75,7 +75,6 @@ class CheckChats(object):
         self: 'AdBotClient',
         chats: Union[CheckChat, Iterable[CheckChat]],
         /,
-        folder_id: Optional[int] = None,
         *,
         fetch_peers: bool = True,
     ) -> Union[Optional[Chat], list[Optional[Chat]]]:
@@ -88,9 +87,6 @@ class CheckChats(object):
                 the client.
                     Can optionally be a tuples of the chat link and chat
                     invite links to try and join if the chat is not accessible.
-
-            folder_id (``Optional[int]``, *optional*):
-                The id of a peer folder to put joined chats to.
 
         Returns:
             The lif of the one or many chats that should be accessible by
@@ -110,9 +106,9 @@ class CheckChats(object):
 
         agen = self.iter_check_chats(
             chats,
-            folder_id,
             fetch_peers=fetch_peers,
             yield_on_flood=False,
+            yield_on_exception=False,
         )
         if not is_iterable:
             return await anext(aiter(agen), None)
@@ -122,10 +118,10 @@ class CheckChats(object):
         self: 'AdBotClient',
         chats: Union[CheckChat, Iterable[CheckChat]],
         /,
-        folder_id: Optional[int] = None,
         *,
         fetch_peers: bool = True,
         yield_on_flood: Optional[bool] = None,
+        yield_on_exception: Optional[bool] = None,
     ) -> AsyncGenerator[Optional[Chat], None]:
         """
         Check if each of the chats is accesible by this client.
@@ -136,9 +132,6 @@ class CheckChats(object):
                 the client.
                     Can optionally be a tuples of the chat link and chat
                     invite links to try and join if the chat is not accessible.
-
-            folder_id (``Optional[int]``, *optional*):
-                The id of a peer folder to put joined chats to.
 
             yield_on_flood (``Optional[bool]``, *optional*):
                 If the `FloodWait` exception should be yielded.
@@ -158,122 +151,116 @@ class CheckChats(object):
         def is_iter(_: Any, /) -> bool:
             return not isinstance(_, str) and isinstance(_, Iterable)
 
-        if isinstance(chats, AsyncGenerator):
+        if chats is None:
+            raise ValueError('There are no chats to check.')
+        elif isinstance(chats, AsyncGenerator):
             chats: Iterable[CheckChat] = [_ async for _ in chats]
         elif isinstance(chats, Generator):
             chats: Iterable[CheckChat] = list(chats)
-
-        if is_iter(chats) and not any(map(is_iter, chats)):
-            if not chats:
-                raise ValueError('There are no chats to check.')
         elif not (is_iter(chats) and any(map(is_iter, chats))):
             chats = (chats,)
-        else:
-            for index, chat in enumerate(chats):
-                if not chat:
-                    raise ValueError(f'The chat with index #{index} is empty.')
 
-        chats: dict[Union[int, str, Chat], Iterable[CheckChat]] = {
-            next(iter(chat)) if is_iter(chat) else chat: chat for chat in chats
-        }
-
-        async def join(chat: CheckChat, /) -> Optional[Chat]:
-            async def join(invite_link: Union[int, str], /) -> Optional[Chat]:
-                if not invite_link:
-                    return None
-                try:
-                    try:
-                        if self.is_bot:
-                            raise RPCError
-                        chat = await self.join_chat(invite_link)
-                    except UserAlreadyParticipant:
-                        chat = await self.get_chat(invite_link)
-                except FloodWait:
-                    raise
-                except RPCError as _:
-                    return None
-
-                with suppress(RPCError):
-                    if folder_id == 1:
-                        await self.archive_chats(chat.id)
-                    elif folder_id == 0:
-                        await self.unarchive_chats(chat.id)
-
-                return chat
-
-            if not is_iter(chat):
-                return None
-            elif len(chat) == 1:
-                return await join(next(iter(chat)))
-
-            chat_iter = iter(chat)
-            next(chat_iter)
-            for chat_invites in chat_iter:
-                if not is_iter(chat_invites):
-                    if (chat := await join(chat_invites)) is not None:
-                        return chat
-                else:
-                    for chat_link in chat_invites:
-                        if (chat := await join(chat_link)) is not None:
-                            return chat
-            return None
-
-        peers: dict[CheckChat, Union[InputPeerChat, InputPeerChannel]] = {}
-        for chat_link in chats:
-            if not isinstance(chat_link, str) or (
-                not self.INVITE_LINK_RE.match(chat_link)
-            ):
-                try:
-                    peers[chat_link] = await self.resolve_peer(
-                        chat_link, fetch=False
+        if not chats:
+            raise ValueError('There are no chats to check.')
+        for index, chat_links in enumerate(chats):
+            if chat_links is None or is_iter(chat_links):
+                if not chat_links:
+                    raise ValueError(
+                        f'There are no links at chat with index #{index}.'
                     )
-                except PeerIdInvalid:
-                    pass
-                except FloodWait as e:
-                    if yield_on_flood:
-                        yield CheckChatsFloodWait({}, e.value)
-                    else:
-                        raise
+            else:
+                chats[index] = (chat_links,)
 
-        dialog_chats: dict[str, Chat] = {}
-        if peers and self.is_bot:
-            for chat_link, chat in chats.items():
-                if (peer := peers.get(chat_link)) is not None:
-                    dialog_chats[chat_link] = await self.get_chat(peer)
-        elif peers:
+        async def join(invite_link: Union[int, str], /) -> Optional[Chat]:
+            if not isinstance(invite_link, str) or not invite_link:
+                return None
+            try:
+                try:
+                    if self.is_bot:
+                        raise RPCError
+                    return await self.join_chat(invite_link)
+                except UserAlreadyParticipant:
+                    return await self.get_chat(invite_link)
+            except FloodWait:
+                raise
+
+        peers: List[Union[None, InputPeerChat, InputPeerChannel]] = []
+        for chat_links in chats:
+            for chat_link in chat_links:
+                if not (
+                    isinstance(chat_link, str)
+                    and self.INVITE_LINK_RE.match(chat_link)
+                ):
+                    with suppress(PeerIdInvalid):
+                        peer = await self.resolve_peer(chat_link, fetch=False)
+                        if peer is not None:
+                            peers.append(peer)
+                            break
+            else:
+                peers.append(None)
+
+        dialog_chats: Dict[int, Optional[Chat]] = {}
+        if self.is_bot:
+            for chat_links, peer in zip(chats, peers):
+                if peer is not None:
+                    dialog_chats[
+                        get_input_peer_id(peer)
+                    ] = await self.get_chat(peer)
+        else:
             with suppress(NotAcceptable):
-                for dialog in await self.get_peer_dialogs(
-                    peers.values(), fetch_peers=fetch_peers
+                for dialog, peer in zip(
+                    await self.get_peer_dialogs(
+                        _peers := [_ for _ in peers if _ is not None],
+                        fetch_peers=fetch_peers,
+                    ),
+                    _peers,
                 ):
                     if dialog.top_message is not None:
-                        for chat_link, chat in chats.items():
-                            if (peer := peers.get(chat_link)) is not None:
-                                chat_id = get_input_peer_id(peer)
-                                if chat_id == dialog.chat.id:
-                                    dialog_chats[chat_link] = dialog.chat
-                                    break
+                        dialog_chats[get_input_peer_id(peer)] = dialog.chat
 
         flood: int = 0
-        for chat_link, chat in chats.items():
-            if chat_link in dialog_chats:
-                yield dialog_chats[chat_link]
-            elif monotonic() < flood or isinstance(
-                peers.get(chat_link), InputPeerUser
-            ):
-                yield None
-            else:
+        for chat_links, peer in zip(chats, peers):
+            success = False
+            for chat_link in chat_links:
+                if peer is not None and (
+                    get_input_peer_id(peer) in dialog_chats
+                ):
+                    yield dialog_chats[get_input_peer_id(peer)]
+                    break
+                elif monotonic() < flood or isinstance(peer, InputPeerUser):
+                    yield None
+                    break
+                elif not isinstance(chat_link, str) or not chat_link:
+                    continue
+
                 while True:
                     try:
-                        yield await join(chat)
+                        yield await join(chat_link)
+                        success = True
                     except FloodWait as e:
                         if yield_on_flood:
-                            _c = {chats[_]: c for _, c in dialog_chats.items()}
+                            _c = {
+                                chat_links: dialog_chats[
+                                    get_input_peer_id(peer)
+                                ]
+                                for chat_links, peer in zip(chats, peers)
+                                if peer is not None
+                                and get_input_peer_id(peer) in dialog_chats
+                            }
                             yield CheckChatsFloodWait(_c, e.value)
+                            continue
                         elif yield_on_flood is None:
                             flood = monotonic() + e.value
-                            yield None
-                            break
                         else:
                             raise
-                    else:
-                        break
+                    except RPCError as exception:
+                        if yield_on_exception:
+                            yield exception
+                            continue
+                        elif yield_on_exception is not None:
+                            raise
+                    break
+                if success:
+                    break
+            else:
+                yield None
