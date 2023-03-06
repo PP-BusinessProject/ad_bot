@@ -333,13 +333,6 @@ class AdMessage(object):
                     else 'Для этого чата нет высланных сообщений.'
                 )
 
-            scheduled_messages_count: int = await self.storage.Session.scalar(
-                select(count()).filter(
-                    AdChatMessageModel.ad_chat_id == ad.chat_id,
-                    AdChatMessageModel.ad_message_id == ad.message_id,
-                    AdChatMessageModel.scheduled,
-                )
-            )
             return await self.send_or_edit(
                 *(chat_id, message_id),
                 text='\n'.join(
@@ -355,9 +348,8 @@ class AdMessage(object):
                             chat_id,
                         ),
                         '',
-                        '**Всего сообщений в журнале:** %s шт '
-                        '(Запланировано %s шт)'
-                        % (messages_count, scheduled_messages_count),
+                        '**Всего сообщений в журнале:** %s шт'
+                        % messages_count,
                     )
                     if _ is not None
                 ),

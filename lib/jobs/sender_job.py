@@ -31,8 +31,6 @@ from sqlalchemy.exc import IntegrityError, MissingGreenlet
 from sqlalchemy.orm.strategy_options import contains_eager, joinedload
 from sqlalchemy.orm.util import with_parent
 from sqlalchemy.sql.expression import or_, select, update
-from sqlalchemy.sql.functions import count
-from sqlalchemy.sql.functions import max as sql_max
 from sqlalchemy.sql.functions import now
 
 from ..models.bots.client_model import ClientModel
@@ -212,48 +210,8 @@ class SenderJob(object):
             ad_chats = None
             successful_chats = 0
             try:
-                ad_chats_messages = (
-                    select(
-                        AdChatMessageModel.ad_chat_id,
-                        AdChatMessageModel.ad_message_id,
-                        AdChatMessageModel.chat_id,
-                        count().label('scheduled_count'),
-                        sql_max(AdChatMessageModel.timestamp).label(
-                            'last_sent_at'
-                        ),
-                    )
-                    .filter(
-                        AdChatMessageModel.ad_chat_id == ad.chat_id,
-                        AdChatMessageModel.ad_message_id == ad.message_id,
-                        AdChatMessageModel.scheduled,
-                    )
-                    .group_by(
-                        AdChatMessageModel.ad_chat_id,
-                        AdChatMessageModel.ad_message_id,
-                        AdChatMessageModel.chat_id,
-                    )
-                    .subquery()
-                )
                 ad_chats = await self.storage.Session.execute(
-                    select(
-                        AdChatModel,
-                        PeerModel,
-                        ad_chats_messages.c.scheduled_count,
-                        ad_chats_messages.c.last_sent_at,
-                    )
-                    .join(
-                        ad_chats_messages,
-                        (
-                            AdChatModel.ad_chat_id
-                            == ad_chats_messages.c.ad_chat_id
-                        )
-                        & (
-                            AdChatModel.ad_message_id
-                            == ad_chats_messages.c.ad_message_id
-                        )
-                        & (AdChatModel.chat_id == ad_chats_messages.c.chat_id),
-                        isouter=True,
-                    )
+                    select(AdChatModel, PeerModel)
                     .join(
                         PeerModel,
                         (PeerModel.session_phone_number == bot.phone_number)
@@ -264,22 +222,17 @@ class SenderJob(object):
                         with_parent(ad, AdModel.chats),
                         AdChatModel.active,
                         or_(
-                            ad_chats_messages.c.scheduled_count.is_(None),
-                            ad_chats_messages.c.scheduled_count
-                            < AdChatModel.max_scheduled_count,
-                        ),
-                        or_(
                             AdChatModel.slowmode_wait.is_(None),
                             now() > AdChatModel.slowmode_wait,
                         ),
-                        # or_(
-                        #     AdChatModel.last_sent_at.is_(None),
-                        #     now() - AdChatModel.last_sent_at
-                        #     > AdChatModel.period,
-                        # ),
+                        or_(
+                            AdChatModel.last_sent_at.is_(None),
+                            now() - AdChatModel.last_sent_at
+                            > AdChatModel.period,
+                        ),
                     )
                     .order_by(
-                        ad_chats_messages.c.last_sent_at.nullsfirst(),
+                        AdChatModel.last_sent_at.nullsfirst(),
                         AdChatModel.created_at,
                     )
                     .options(joinedload(AdChatModel.chat))
@@ -292,34 +245,23 @@ class SenderJob(object):
                         bot.id,
                     )
                     continue
-                for (
-                    ad_chat,
-                    chat_peer,
-                    scheduled_count,
-                    last_sent_at,
-                ) in ad_chats:
-                    _now = last_sent_at or datetime.now(tzlocal())
-                    for index in range(
-                        1, ad_chat.max_scheduled_count - (scheduled_count or 0)
+                for ad_chat, chat_peer in ad_chats:
+                    if not await self._sender_chat_job(
+                        worker,
+                        ad_chat,
+                        service_peer=service_peer,
+                        chat_peer=chat_peer,
                     ):
-                        if not await self._sender_chat_job(
-                            worker,
-                            ad_chat,
-                            schedule_date=_now + ad_chat.period * index,
-                            service_peer=service_peer,
-                            chat_peer=chat_peer,
-                        ):
-                            log.warning(
-                                '[%s] Chat `%s` is not accessible for sending '
-                                'an ad #%s of bot #%s!',
-                                bot.phone_number,
-                                ad_chat.chat.title,
-                                ad.message_id,
-                                bot.id,
-                            )
-                            break
-                    else:
-                        successful_chats += 1
+                        log.warning(
+                            '[%s] Chat `%s` is not accessible for sending '
+                            'an ad #%s of bot #%s!',
+                            bot.phone_number,
+                            ad_chat.chat.title,
+                            ad.message_id,
+                            bot.id,
+                        )
+                        continue
+                    successful_chats += 1
             finally:
                 log.info(
                     '[%s] Finished sending ad #%s of bot #%s '
@@ -341,7 +283,6 @@ class SenderJob(object):
         worker: 'AdBotClient',
         ad_chat: Iterable[AdChatModel],
         /,
-        schedule_date: Optional[datetime] = None,
         service_peer: Optional[PeerModel] = None,
         chat_peer: Optional[PeerModel] = None,
     ) -> bool:
@@ -353,9 +294,6 @@ class SenderJob(object):
                         service_peer or ad_chat.ad_chat_id,
                         ad_chat.ad_message_id,
                         drop_author=True,
-                        schedule_date=schedule_date.timestamp().__ceil__()
-                        if schedule_date is not None
-                        else None,
                     )
                 except PeerIdInvalid:
                     if not (ad_chat.chat.invite_link or ad_chat.chat.username):
@@ -375,19 +313,15 @@ class SenderJob(object):
                 if sent_msg.chat is not None
                 else f'https://t.me/c/%s/{sent_msg.id}'
                 % (ad_chat.username or get_channel_id(ad_chat.chat_id)),
-                timestamp=sent_msg.date
-                or schedule_date
-                or datetime.now(tzlocal()),
+                timestamp=sent_msg.date or datetime.now(tzlocal()),
             )
             log.info(
-                '[%s] %s ad #%s of bot #%s to `%s`:%s%s.',
+                '[%s] Sent ad #%s of bot #%s to `%s`:%s.',
                 ad_chat.ad.owner_bot.phone_number,
-                'Sent' if schedule_date is None else 'Scheduled',
                 ad_chat.ad_message_id,
                 ad_chat.ad.owner_bot.id,
                 ad_chat.chat.title,
                 sent_msg.id,
-                ' at %s' % schedule_date if schedule_date is not None else '',
             )
             self.storage.Session.add(sent_ad)
             return True
@@ -395,7 +329,7 @@ class SenderJob(object):
             ad_chat.ad.corrupted = True
         except SlowmodeWait as e:
             log.warning(
-                '[%s] `%s` slowmode for %s seconds!',
+                '[%s] Chat `%s` slowmode for %s seconds!',
                 ad_chat.ad.owner_bot.phone_number,
                 ad_chat.chat.title,
                 e.value,

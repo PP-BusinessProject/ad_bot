@@ -34,7 +34,7 @@ async def main() -> None:
                 or record.msg.endswith('executed successfully')
             )
 
-    basicConfig(level=environ.get('LOGGING', 'DEBUG').strip(), force=True)
+    basicConfig(level=environ.get('LOGGING', 'INFO').strip(), force=True)
     getLogger('apscheduler.executors.default').addFilter(_CustomFilter())
     client: Final[AdBotClient] = AdBotClient(
         api_id=int(environ['ADBOT_API_ID'].strip()),

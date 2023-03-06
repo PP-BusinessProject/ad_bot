@@ -139,7 +139,13 @@ class ChatMessage(object):
                             ' '.join(
                                 (
                                     ad_chat.chat.title,
-                                    '✅' if ad_chat.active else '❌',
+                                    '⚠️'
+                                    if ad_chat.slowmode_wait is not None
+                                    and ad_chat.slowmode_wait
+                                    > datetime.now(tzlocal())
+                                    else '✅'
+                                    if ad_chat.active
+                                    else '❌',
                                 )
                             ),
                             Query(
@@ -370,12 +376,6 @@ class ChatMessage(object):
             if not (messages := messages.all()):
                 return await abort('Для этого чата нет высланных сообщений.')
 
-            scheduled_messages_count: int = await self.storage.Session.scalar(
-                select(count()).filter(
-                    with_parent(ad_chat, AdChatModel.messages),
-                    AdChatMessageModel.scheduled,
-                )
-            )
             return await self.send_or_edit(
                 *(chat_id, message_id),
                 text='\n'.join(
@@ -383,9 +383,8 @@ class ChatMessage(object):
                     for _ in (
                         message_header(self, ad_chat, chat_id),
                         '',
-                        '**Всего сообщений в журнале:** %s шт '
-                        '(Запланировано %s шт)'
-                        % (messages_count, scheduled_messages_count),
+                        '**Всего сообщений в журнале:** %s шт'
+                        % messages_count,
                     )
                     if _ is not None
                 ),
@@ -456,6 +455,13 @@ class ChatMessage(object):
                     + ('Активен' if ad_chat.active else 'Неактивен'),
                     '**Периодичность:** '
                     + self.morph.timedelta(ad_chat.period),
+                    '**Задержка до:** '
+                    + ad_chat.slowmode_wait.astimezone().strftime(
+                        r'%Y-%m-%d %H:%M:%S'
+                    )
+                    if ad_chat.slowmode_wait is not None
+                    and ad_chat.slowmode_wait > datetime.now(tzlocal())
+                    else None,
                     '**Причина деактивации:** '
                     + (
                         'Id чата изменился. Попробуйте добавить чат заново.'
